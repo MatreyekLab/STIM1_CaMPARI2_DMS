@@ -1,0 +1,25 @@
+,Live | Freq. of Parent (%),"Live/Singlets/G610-A, V450-A subset | Freq. of Parent (%)","Live/Singlets/G610-A, V450-A subset | Geometric Mean (B515-A)","Live/Singlets/G610-A, V450-A subset | Median (B515-A)","Live/Singlets/G610-A, V450-A subset | Mode (B515-A)",variant,replicate
+293T_landing_pad_Specimen_002_A5_A05_003.fcs,23.4,13.8,25623,32022,35678,E66K,4
+293T_landing_pad_Specimen_002_A6_A06_004.fcs,18.8,25.1,20489,26828,31793,A67T,4
+293T_landing_pad_Specimen_002_A7_A07_005.fcs,15.6,32.1,19872,29097,34331,R69C,4
+293T_landing_pad_Specimen_002_A8_A08_006.fcs,27.9,42.7,18824,27872,29447,R69H,4
+293T_landing_pad_Specimen_002_A9_A09_007.fcs,25,39.9,22006,30088,29447,K73R,4
+293T_landing_pad_Specimen_002_A10_A10_008.fcs,19.3,33.9,23669,31793,33037,D76G,4
+293T_landing_pad_Specimen_002_A11_A11_009.fcs,31.2,30.3,18932,25038,28342,N80S,4
+293T_landing_pad_Specimen_002_A12_A12_010.fcs,32.6,38.8,22998,29730,35678,G81C,4
+293T_landing_pad_Specimen_002_B1_B01_011.fcs,42.4,49.9,24193,30597,34331,D84N,4
+293T_landing_pad_Specimen_002_B2_B02_012.fcs,31.7,35.7,23384,30232,34331,E90D,4
+293T_landing_pad_Specimen_002_B3_B03_013.fcs,22.5,40.9,29389,35507,43273,F91Y,4
+293T_landing_pad_Specimen_002_B4_B04_014.fcs,32,40.7,26543,33436,38537,H72Q,4
+293T_landing_pad_Specimen_002_B5_B05_015.fcs,27.1,34.4,21903,27673,29447,G81D,4
+293T_landing_pad_Specimen_002_B6_B06_016.fcs,30.5,35.3,28551,33037,40054,D84E,4
+293T_landing_pad_Specimen_002_B7_B07_017.fcs,34.7,43.7,22928,31869,33037,L92V,4
+293T_landing_pad_Specimen_002_B8_B08_018.fcs,29,43.2,21112,31945,34331,L96V,4
+293T_landing_pad_Specimen_002_B9_B09_019.fcs,34,43.3,18604,23316,29447,L74P,4
+293T_landing_pad_Specimen_002_B10_B10_020.fcs,28.1,23.7,27473,34830,37079,D84G,4
+293T_landing_pad_Specimen_002_D5_D05_039.fcs,24.6,60.2,20459,28614,34331,WT,4
+293T_landing_pad_Specimen_002_D6_D06_040.fcs,39.8,0.025,5262,17696,271,vif,4
+293T_landing_pad_Specimen_002_D7_D07_041.fcs,23.9,66.7,24487,32409,33037,R429C,4
+293T_landing_pad_Specimen_002_D8_D08_042.fcs,26,64.3,26513,34249,38537,R304W,4
+293T_landing_pad_Specimen_002_D9_D09_043.fcs,35,0.087,3442,952,250,vif + TG,4
+293T_landing_pad_Specimen_002_D10_D10_044.fcs,21.9,58.1,25284,34746,37079,WT + TG,4

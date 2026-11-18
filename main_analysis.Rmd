@@ -1,0 +1,2270 @@
+---
+title: "STIM1 CaMPARI2 DMS Analysis"
+author: "Nisha D. Kamath, Kenneth A. Matreyek"
+date: "2026-05-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(reshape)
+library(ggrepel)
+library(gridExtra)
+library(scales)
+library(stringr)
+library(ggpubr)
+library(GGally)
+library(ggpmisc)
+library(ggbeeswarm)
+library(patchwork)
+library(rstatix)
+library(ggtext)
+library(factoextra)
+library(cluster)
+library(ggdendro)
+library(dendextend)
+library(kableExtra)
+library(pROC)
+set.seed(96)
+theme_update(panel.grid.minor = element_blank())
+theme_set(theme_classic())
+```
+
+#Bulk assay readouts (for raw data look at end of script)
+
+```{r Fig2a,b - heatmap and hclust of bulk assay data}
+all_data_vus = read.csv("data/all_data_vus.csv")
+all_data_vus = all_data_vus[-1]
+all_data_vus1 = all_data_vus %>% column_to_rownames(var = "variant") %>% select(endo_ratio, campari, puncta_formation, chop, bax_bcl2, nfkb, nfat, bip, abundance)
+
+vus_scaled = data.frame(scale(all_data_vus1, center = FALSE))
+dist_matrix_variant = dist(vus_scaled, method = "euclidean")
+fviz_dist(dist_matrix_variant)
+
+variables_scaled = t(vus_scaled)
+dist_matrix_variables = dist(variables_scaled, method = "euclidean")
+fviz_dist(dist_matrix_variables)
+
+hc_var = hclust(dist_matrix_variant, method = "complete")
+hc_assay = hclust(dist_matrix_variables, method = "complete")
+
+hc_assay_plot = ggdendrogram(hc_assay)
+hc_var_plot = ggdendrogram(hc_var); hc_var_plot
+ggsave("plots/hc_assay_plot.pdf", hc_assay_plot, height = 2, width = 2)
+ggsave("plots/hc_var_plot.pdf", hc_var_plot, height = 2, width = 3)
+
+hc_var$order
+
+#rotating for clarity
+hc_var_dend = as.dendrogram(hc_var)
+var_order = c("WT", "R69C", "N80S", "E90D", "E66K", "R69H", "A67T", "K73R", "L74P", "D84N", "F91Y", "H72Q", "D84G", "D76G", "G81D", "G81C", "L96V", "L92V", "D84E")
+hc_var_rotated = rotate(hc_var_dend, var_order)
+hc_var_rotated_plot = ggdendrogram(hc_var_rotated)
+ggsave("plots/hc_var_rotated.pdf", hc_var_rotated_plot, height = 2, width = 3)
+
+vus_scaled1 = vus_scaled
+vus_scaled1$variant = rownames(vus_scaled1)
+vus_scaled2 = vus_scaled1 %>% melt(id = 'variant')
+
+vus_scaled2$variant = factor(vus_scaled2$variant, c("WT", "R69C", "N80S", "E90D", "A67T", "E66K", "R69H", "K73R", "D84N", "F91Y", "D76G", "H72Q", "D84G", "L74P", "L92V", "D84E", "G81D", "G81C", "L96V"))
+vus_scaled2$variable = factor(vus_scaled2$variable, c("endo_ratio", "campari", "aggregation", "abundance", "bax_bcl2" ,"chop", "nfkb", "nfat", "bip"))
+
+vus_scaled_hm = ggplot(data = vus_scaled2, aes(x= variant, y= variable, fill = value))+
+  geom_tile()+
+  scale_fill_gradientn(colours = c("blue", "white", "red"),
+                       values = scales::rescale(c(0, 1, 2))) + labs(x= NULL, y= NULL)+
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1), legend.position = "none")+NULL; vus_scaled_hm
+ggsave("plots/vus_scaled_hm.pdf", vus_scaled_hm, height = 2, width = 4.5)
+```
+
+```{r Fig2c,d - PCA of bulk assay data}
+pca_vus = prcomp(vus_scaled)
+summary(pca_vus)
+pca_vus_results = data.frame(pca_vus$x)
+pca_vus_results$variant = rownames(pca_vus_results)
+
+pca_vus_rotation = data.frame(pca_vus$rotation)
+pca_vus_rotation$variable = rownames(pca_vus_rotation)
+
+pca_vus_results = pca_vus_results %>% mutate(type = case_when(variant %in% c("K73R", "F91Y", "D76G", "G81C", "D84N", "R69C", "R69H", "E90D", "A67T", "E66K", "N80S") ~ "VUS",
+                                                        variant %in% c("H72Q", "L92V", "D84G","L74P","G81D","D84E","L96V") ~ "pathogenic"),
+                                             allele_freq = case_when(variant %in% c("E66K", "A67T", "R69C", "R69H" ,"N80S", "E90D", "WT") ~ "yes",
+                                                                     variant %in% c("K73R", "D84N", "F91Y", "D76G", "G81C", "H72Q", "D84G", "L74P", "L92V", "D84E", "G81D", "L96V") ~ "no"))
+
+vus_variable_pca = ggplot(data = pca_vus_rotation, aes(x= PC1, y= PC2))+
+  labs(x= "PC1 (55% Variance)", y= "PC2 (15% Variance)")+
+  geom_hline(yintercept = 0, linetype = "dotted", alpha = 0.25)+
+  geom_vline(xintercept = 0, linetype = "dotted", alpha = 0.25)+
+  geom_segment(data = pca_vus_rotation, aes(x= 0, y= 0, xend = PC1, yend = PC2), arrow = arrow(length = unit(0.1, "cm")))+
+  geom_text_repel(aes(label = variable), hjust = 0) + NULL; vus_variable_pca
+
+ggsave("plots/vus_variable_pca.pdf", vus_variable_pca, height = 3, width = 4)
+
+vus_pca_plot = ggplot()+
+  labs(x= "PC1 (55% Variance)", y= "PC2 (15% Variance)")+
+  # geom_point(data = pca_vus_results %>% filter(allele_freq == "yes"), aes(x= PC1, PC2), size = 3)+
+  geom_point(data = pca_vus_results, aes(x= PC1, y= PC2, color = type))+ 
+  geom_text_repel(data = pca_vus_results, aes(x= PC1, y= PC2, label = variant, color = type))+
+  theme(legend.position = "none")+NULL; vus_pca_plot
+
+ggsave("plots/vus_vus_pca.pdf", vus_pca_plot, height = 3, width = 4)
+
+ggplot(data = pca_vus_rotation, aes(x= PC1, y= PC3))+
+  labs(x= "PC1 (55% Variance)", y= "PC3 (13% Variance)")+
+  geom_hline(yintercept = 0, linetype = "dotted", alpha = 0.25)+
+  geom_vline(xintercept = 0, linetype = "dotted", alpha = 0.25)+
+  geom_segment(data = pca_vus_rotation, aes(x= 0, y= 0, xend = PC1, yend = PC3), arrow = arrow(length = unit(0.1, "cm")))+
+  geom_text_repel(aes(label = variable), hjust = 0)
+
+
+
+vus_scaled2 = vus_scaled2 %>% mutate(type = case_when(variant %in% c("WT", "R69C", "N80S", "E90D", "A67T", "E66K", "R69H") ~ "gnomad",
+                                                      variant %in% c("K73R", "D84N", "F91Y", "D76G", "G81C") ~ "VUS",
+                                                      variant %in% c("H72Q", "D84G", "L74P", "L92V", "D84E", "G81D", "L96V") ~ "path"))
+
+bulk_assay_hist = ggplot()+
+  geom_histogram(data = vus_scaled2 %>% filter(variable %in% c("endo_ratio", "campari", "aggregation")), aes(x= value, fill = type), color = "black", alpha = 0.75, bins = 15)+ 
+  scale_fill_manual(values = c("gnomad" = "deeppink3", "VUS" = "white", "path" = "darkgreen"))+
+  facet_grid(rows = vars(variable), scales = "free_y") + theme(legend.position = "none")+NULL; bulk_assay_hist
+
+ggsave("plots/bulk_assay_hist.pdf", bulk_assay_hist, height = 2.5, width = 3)
+```
+
+#Initial data processing for growth and calcium influx scores
+```{r data for gating strategy schematic}
+all_flow = read.csv("data/dms_flow_run.csv") %>% mutate(sample = case_when(SampleID == 1 ~ "g1_e66k",
+                                                                         SampleID == 2 ~ "g1_e90x",
+                                                                         SampleID == 3 ~ "g1_g81d",
+                                                                         SampleID == 4 ~ "g1_g81d",
+                                                                         SampleID == 5 ~ "g1_lib_mix",
+                                                                         SampleID == 6 ~ "g1_l92v",
+                                                                         SampleID == 7 ~ "g1_l92v",
+                                                                         SampleID == 8 ~ "g2_e66k",
+                                                                         SampleID == 9 ~ "g2_e90x",
+                                                                         SampleID == 10 ~ "g2_g81d",
+                                                                         SampleID == 11 ~ "g2_l92v",
+                                                                         SampleID == 12 ~ "g2_r3_sort",
+                                                                         SampleID == 13 ~ "g1_r3_sort",
+                                                                         SampleID == 14 ~ "g2_r4_sort",
+                                                                         SampleID == 15 ~ "g1_r4_sort",
+                                                                         SampleID == 16 ~ "r3_recombrate",
+                                                                         SampleID == 17 ~ "r3_recombrate",
+                                                                         SampleID == 18 ~ "r4_recombrate",
+                                                                         SampleID == 19 ~ "g1_r69c",
+                                                                         SampleID == 20 ~ "g1_r5_sort",
+                                                                         SampleID == 21 ~ "g2_r5_sort",
+                                                                         SampleID == 22 ~ "r5_recombrate"))
+
+all_flow = all_flow %>% filter(FSC.A < 175000 & FSC.A > 50000 & SSC.A < 175000 & SSC.A > 50000)
+flow_sort = all_flow %>% filter(sample %in% c("g1_r3_sort", "g2_r3_sort", "g1_r4_sort", "g2_r4_sort", "g1_r5_sort", "g2_r5_sort"))
+
+sort_gate_plot_g1 = ggplot(data = flow_sort %>% filter(sample %in% c("g1_r3_sort", "g1_r4_sort", "g1_r5_sort")), aes(x= YG.586_15.A.B.515_20.A))+
+  geom_density(fill = "grey", linewidth = 1)+ scale_x_log10(limits= c(0.01, 10)) +
+  geom_density(data = all_flow %>% filter(sample %in% c("g1_e90x")), aes(x= YG.586_15.A.B.515_20.A), alpha = 0.15, fill = "blue", linewidth = 0.75, color = "darkblue") +
+  geom_density(data = all_flow %>% filter(sample %in% c("g1_g81d")), aes(x= YG.586_15.A.B.515_20.A), alpha = 0.15, fill = "red", linewidth = 0.75, color = "darkred") + labs(x= NULL, y= NULL) +
+  geom_vline(xintercept = quantile(flow_sort$YG.586_15.A.B.515_20.A, probs = c(0.15, 0.5, 0.85)), linetype = "dashed")+NULL; sort_gate_plot_g1
+
+sort_gate_plot_g2 = ggplot(data = flow_sort %>% filter(sample %in% c("g2_r3_sort", "g2_r4_sort", "g2_r5_sort")), aes(x= YG.586_15.A.B.515_20.A))+
+  geom_density(fill = "grey", linewidth = 1)+ scale_x_log10(limits= c(0.01, 10)) +
+  geom_density(data = all_flow %>% filter(sample %in% c("g2_e90x")), aes(x= YG.586_15.A.B.515_20.A), alpha = 0.15, fill = "blue", linewidth = 0.75, color = "darkblue") +
+  geom_density(data = all_flow %>% filter(sample %in% c("g2_g81d")), aes(x= YG.586_15.A.B.515_20.A), alpha = 0.15, fill = "red", linewidth = 0.75, color = "darkred") + labs(x= NULL, y= NULL) +
+  geom_vline(xintercept = quantile(flow_sort$YG.586_15.A.B.515_20.A, probs = c(0.35, 0.52, 0.92)), linetype = "dashed")+NULL; sort_gate_plot_g2
+
+ggsave("plots/sort_gate_plot_g1.pdf", sort_gate_plot_g1, height = 0.75, width = 2)
+ggsave("plots/sort_gate_plot_g2.pdf", sort_gate_plot_g2, height = 0.75, width = 2)
+
+all_flow %>% distinct(sample)
+
+#for percentages in fig 3a
+
+distinct(all_flow, sample)
+g1 = all_flow %>% filter(sample %in% c("g1_e66k", "g1_e90x", "g1_g81d", "g1_l92v", "g1_r69c"))
+g2 = all_flow %>% filter(sample %in% c("g2_e66k", "g2_e90x", "g2_g81d", "g2_l92v", "g2_r69c"))
+
+#gating strategy A
+flow_sort_run2_g1_a = g1 %>% filter(YG.586_15.A.B.515_20.A < quantile(flow_sort$YG.586_15.A.B.515_20.A, probs = 0.15))
+flow_sort_run2_g1_a = count(flow_sort_run2_g1_a, sample)
+colnames(flow_sort_run2_g1_a)[2] = "bin_a"
+flow_sort_run2_g1_a <- setNames(data.frame(t(flow_sort_run2_g1_a[-1])), flow_sort_run2_g1_a[[1]])
+
+flow_sort_run2_g1_b = g1 %>% filter(YG.586_15.A.B.515_20.A > quantile(flow_sort$YG.586_15.A.B.515_20.A, probs = 0.15) & YG.586_15.A.B.515_20.A < quantile(flow_sort$YG.586_15.A.B.515_20.A, probs = 0.5))
+flow_sort_run2_g1_b = count(flow_sort_run2_g1_b, sample) 
+colnames(flow_sort_run2_g1_b)[2] = "bin_b"
+flow_sort_run2_g1_b <- setNames(data.frame(t(flow_sort_run2_g1_b[-1])), flow_sort_run2_g1_b[[1]])
+
+flow_sort_run2_g1_c = g1 %>% filter(YG.586_15.A.B.515_20.A > quantile(flow_sort$YG.586_15.A.B.515_20.A, probs = 0.5) & YG.586_15.A.B.515_20.A < quantile(flow_sort$YG.586_15.A.B.515_20.A, probs = 0.85))
+flow_sort_run2_g1_c = count(flow_sort_run2_g1_c, sample) 
+colnames(flow_sort_run2_g1_c)[2] = "bin_c"
+flow_sort_run2_g1_c <- setNames(data.frame(t(flow_sort_run2_g1_c[-1])), flow_sort_run2_g1_c[[1]])
+
+flow_sort_run2_g1_d = g1 %>% filter(YG.586_15.A.B.515_20.A > quantile(flow_sort$YG.586_15.A.B.515_20.A, probs = 0.85))
+flow_sort_run2_g1_d = count(flow_sort_run2_g1_d, sample)
+colnames(flow_sort_run2_g1_d)[2] = "bin_d"
+flow_sort_run2_g1_d <- setNames(data.frame(t(flow_sort_run2_g1_d[-1])), flow_sort_run2_g1_d[[1]])
+
+g1_pct = rbind(flow_sort_run2_g1_a, flow_sort_run2_g1_b, flow_sort_run2_g1_c, flow_sort_run2_g1_d)
+g1_pct1 = g1_pct %>% mutate(across(where(is.numeric), ~ . / sum(., na.rm = TRUE) * 100))
+
+
+#gating strategy B
+flow_sort_run2_g2_a = g2 %>% filter(YG.586_15.A.B.515_20.A < quantile(flow_sort$YG.586_15.A.B.515_20.A, probs = 0.15))
+flow_sort_run2_g2_a = count(flow_sort_run2_g2_a, sample)
+colnames(flow_sort_run2_g2_a)[2] = "bin_a"
+flow_sort_run2_g2_a <- setNames(data.frame(t(flow_sort_run2_g2_a[-1])), flow_sort_run2_g2_a[[1]])
+
+flow_sort_run2_g2_b = g2 %>% filter(YG.586_15.A.B.515_20.A > quantile(flow_sort$YG.586_15.A.B.515_20.A, probs = 0.15) & YG.586_15.A.B.515_20.A < quantile(flow_sort$YG.586_15.A.B.515_20.A, probs = 0.5))
+flow_sort_run2_g2_b = count(flow_sort_run2_g2_b, sample) 
+colnames(flow_sort_run2_g2_b)[2] = "bin_b"
+flow_sort_run2_g2_b <- setNames(data.frame(t(flow_sort_run2_g2_b[-1])), flow_sort_run2_g2_b[[1]])
+
+flow_sort_run2_g2_c = g2 %>% filter(YG.586_15.A.B.515_20.A > quantile(flow_sort$YG.586_15.A.B.515_20.A, probs = 0.5) & YG.586_15.A.B.515_20.A < quantile(flow_sort$YG.586_15.A.B.515_20.A, probs = 0.85))
+flow_sort_run2_g2_c = count(flow_sort_run2_g2_c, sample) 
+colnames(flow_sort_run2_g2_c)[2] = "bin_c"
+flow_sort_run2_g2_c <- setNames(data.frame(t(flow_sort_run2_g2_c[-1])), flow_sort_run2_g2_c[[1]])
+
+flow_sort_run2_g2_d = g2 %>% filter(YG.586_15.A.B.515_20.A > quantile(flow_sort$YG.586_15.A.B.515_20.A, probs = 0.85))
+flow_sort_run2_g2_d = count(flow_sort_run2_g2_d, sample)
+colnames(flow_sort_run2_g2_d)[2] = "bin_d"
+flow_sort_run2_g2_d <- setNames(data.frame(t(flow_sort_run2_g2_d[-1])), flow_sort_run2_g2_d[[1]])
+
+g2_pct = rbind(flow_sort_run2_g2_a, flow_sort_run2_g2_b, flow_sort_run2_g2_c, flow_sort_run2_g2_d)
+g2_pct1 = g2_pct %>% mutate(across(where(is.numeric), ~ . / sum(., na.rm = TRUE) * 100))
+
+```
+
+
+```{r Sort-seq data}
+variant_name = read.csv("data/variant_name.csv")
+counts_g1 = read.csv("data/counts_gate1.csv")
+counts_g1 = counts_g1[-1]
+
+counts_g1 = counts_g1 %>% mutate(fr3g1_a = r3g1_a/sum(r3g1_a, na.rm = T),
+                                 fr3g1_b = r3g1_b/sum(r3g1_b, na.rm = T),
+                                 fr3g1_c = r3g1_c/sum(r3g1_c, na.rm = T),
+                                 fr3g1_d = r3g1_d/sum(r3g1_d, na.rm = T),
+                                 fr4g1_a = r4g1_a/sum(r4g1_a, na.rm = T),
+                                 fr4g1_b = r4g1_b/sum(r4g1_b, na.rm = T),
+                                 fr4g1_c = r4g1_c/sum(r4g1_c, na.rm = T),
+                                 fr4g1_d = r4g1_d/sum(r4g1_d, na.rm = T),
+                                 fr5g1_a = r5g1_a/sum(r5g1_a, na.rm = T),
+                                 fr5g1_b = r5g1_b/sum(r5g1_b, na.rm = T),
+                                 fr5g1_c = r5g1_c/sum(r5g1_c, na.rm = T),
+                                 fr5g1_d = r5g1_d/sum(r5g1_d, na.rm = T))
+counts_g1 = counts_g1 %>% mutate(wr3 = ((fr3g1_a * 0.15)+ (fr3g1_b * 0.5) + (fr3g1_c * 0.85) + (fr3g1_d * 1))/(fr3g1_a + fr3g1_b + fr3g1_c + fr3g1_d),
+                                 wr4 = ((fr4g1_a * 0.15)+ (fr4g1_b * 0.5) + (fr4g1_c * 0.85) + (fr4g1_d * 1))/(fr4g1_a + fr4g1_b + fr4g1_c + fr4g1_d),
+                                 wr5 = ((fr5g1_a * 0.15)+ (fr5g1_b * 0.5) + (fr5g1_c * 0.85) + (fr5g1_d * 1))/(fr5g1_a + fr5g1_b + fr5g1_c + fr5g1_d))
+
+weighted_freq_g1 = counts_g1 %>% select(1:4,17:31)
+
+ggplot(data = weighted_freq_g1, aes(x= fr3g1_d, y= fr4g1_d))+ scale_y_log10()+ scale_x_log10()+
+  geom_point(alpha = 0.5)
+
+weighted_freq_g1lg = weighted_freq_g1 %>% select(4:16) %>% melt()
+
+
+
+
+weighted_freq_g1$g1_score <- 10^(rowMeans(log10(weighted_freq_g1[, c("wr3", "wr4", "wr5")]), na.rm = TRUE))
+
+weighted_freq_g1 = weighted_freq_g1 %>% mutate(type = case_when(start == end ~ "syn",
+                                                                end == "_" ~ "non",
+                                                                start != end & end != "_" ~ "mis"))
+
+ggplot(data = weighted_freq_g1, aes(x= g1_score))+
+  geom_histogram(alpha = 0.5) +
+  facet_grid(rows = vars(type)) +
+  geom_histogram(data = weighted_freq_g1 %>% filter(variant %in% c("H72Q", "D84G", "L92V", "L96V", "G81D")), aes(x = g1_score, fill = variant)) +
+  geom_histogram(data = weighted_freq_g1 %>% filter(variant %in% c("E66K", "A67T", "R69C", "R69H")), aes(x = g1_score), fill = "black")
+
+#starting with gating strategy 2
+counts_g2 = read.csv("data/counts_gate2.csv")
+counts_g2 = counts_g2[-1]
+counts_g2 = counts_g2 %>% mutate(fr3g2_a = r3g2_a/sum(r3g2_a, na.rm = T),
+                                 fr3g2_b = r3g2_b/sum(r3g2_b, na.rm = T),
+                                 fr3g2_c = r3g2_c/sum(r3g2_c, na.rm = T),
+                                 fr3g2_d = r3g2_d/sum(r3g2_d, na.rm = T),
+                                 fr4g2_a = r4g2_a/sum(r4g2_a, na.rm = T),
+                                 fr4g2_b = r4g2_b/sum(r4g2_b, na.rm = T),
+                                 fr4g2_c = r4g2_c/sum(r4g2_c, na.rm = T),
+                                 fr4g2_d = r4g2_d/sum(r4g2_d, na.rm = T),
+                                 fr5g2_a = r5g2_a/sum(r5g2_a, na.rm = T),
+                                 fr5g2_b = r5g2_b/sum(r5g2_b, na.rm = T),
+                                 fr5g2_c = r5g2_c/sum(r5g2_c, na.rm = T),
+                                 fr5g2_d = r5g2_d/sum(r5g2_d, na.rm = T))
+counts_g2 = counts_g2 %>% mutate(wr3 = ((fr3g2_a * 0.35)+ (fr3g2_b * 0.52) + (fr3g2_c * 0.92) + (fr3g2_d * 1))/(fr3g2_a + fr3g2_b + fr3g2_c + fr3g2_d),
+                                 wr4 = ((fr4g2_a * 0.35)+ (fr4g2_b * 0.52) + (fr4g2_c * 0.92) + (fr4g2_d * 1))/(fr4g2_a + fr4g2_b + fr4g2_c + fr4g2_d),
+                                 wr5 = ((fr5g2_a * 0.35)+ (fr5g2_b * 0.52) + (fr5g2_c * 0.92) + (fr5g2_d * 1))/(fr5g2_a + fr5g2_b + fr5g2_c + fr5g2_d))
+weighted_freq_g2 = counts_g2 %>% select(1:4,17:31)
+
+
+weighted_freq_g2$g2_score <- 10^(rowMeans(log10(weighted_freq_g2[, c("wr3", "wr4", "wr5")]), na.rm = TRUE))
+
+weighted_freq_g2 = weighted_freq_g2 %>% mutate(type = case_when(start == end ~ "syn",
+                                                                end == "_" ~ "non",
+                                                                start != end & end != "_" ~ "mis"))
+
+
+ggplot(data = weighted_freq_g2, aes(x= g2_score))+
+  geom_histogram(alpha = 0.5) +
+  facet_grid(rows = vars(type)) +
+  geom_histogram(data = weighted_freq_g2 %>% filter(variant %in% c("H72Q", "D84G", "L92V", "L96V", "G81D")), aes(x = g2_score, fill = variant)) +
+  geom_histogram(data = weighted_freq_g2 %>% filter(variant %in% c("E66K", "A67T", "R69C", "R69H")), aes(x = g2_score), fill = "black")
+
+g1_score = weighted_freq_g1 %>% select(variant, g1_score)
+g2_score = weighted_freq_g2 %>% select(variant, g2_score)
+sortseq_score = left_join(g1_score, g2_score)
+
+sortseq_score[sortseq_score == "Z0Z"] <- "WT"
+
+#checking that gating strategies yield similar scores and can be combined
+gating_comp = ggplot(data = sortseq_score, aes(x= g1_score, y= g2_score))+ scale_y_continuous(limits = c(0.4,1))+
+  geom_point(alpha = 0.15, size = 1) + labs(x = "Gate A", y= "Gate B")+NULL; gating_comp 
+  # geom_point(data = sortseq_score %>% filter(variant %in% c("L96V", "L92V", "D84E", "G81D")), aes(x= g1_score, y= g2_score), color = "red")+
+  # geom_point(data = sortseq_score %>% filter(variant %in% c("H72Q", "D84G", "L74P")), aes(x= g1_score, y= g2_score), color = "orange")+
+  # geom_point(data = sortseq_score %>% filter(variant %in% c("E66K", "A67T", "R69C", "R69H", "N80S", "E90D")), aes(x= g1_score, y= g2_score), color = "green")+
+  # geom_point(data = sortseq_score %>% filter(variant %in% c("F91Y", "G81C", "D76G", "K73R")), aes(x= g1_score, y= g2_score), color = "blue")+
+  # geom_text_repel(data = sortseq_score %>% filter(variant %in% c("F91Y", "G81C", "D76G", "K73R")), aes(x= g1_score, y= g2_score, label= variant))
+
+ggsave("plots/gating_comp.pdf", gating_comp, height = 2.5, width = 3)
+cor.test(sortseq_score$g1_score, sortseq_score$g2_score, method = "spearman")
+
+sortseq_score$ca_score = 10^(rowMeans(log10(sortseq_score[, c("g1_score", "g2_score")]), na.rm = TRUE))
+#converting final_score to NA if less than 2 scores have values for that variant
+sortseq_score <- sortseq_score %>%
+  mutate(
+    non_na_count = (!is.na(g1_score)) + (!is.na(g2_score)),
+    ca_score = ifelse(non_na_count == 1, NA, ca_score)
+  )
+
+sortseq_score = left_join(variant_name, sortseq_score)
+
+sortseq_score = sortseq_score %>% mutate(type = case_when(start == end ~ "syn",
+                                                    end == "_" ~ "non",
+                                                    start != end & end != "_" ~ "mis"))
+
+all_scores = sortseq_score %>% select(variant, ca_score, type)
+```
+
+#Growth scores are labeled as 'growth_ratio' or 'growth_log_ratio' and survival scores from Kamath & Matreyek, 2025 are labeled as 'endo_ratio' or 'endo_log_ratio'
+
+```{r Growth scores}
+#composite growth score
+
+growth = read.csv("data/growth.csv")
+growth = growth[-1]
+
+## Figure out the total number of reads per sample
+growth_readcounts <- data.frame("total_count" = colSums(growth[,c("lib", "r3_growth", "r4_growth", "r5_growth")], na.rm = T))
+lod_frame <- read.csv(file = "data/Sampling_limit_of_detection.csv", header = T, stringsAsFactors = F)
+
+growth_lod_readcounts <- c()
+growth_lod_freqs <- c()
+for(re in growth_readcounts$total_count){
+  temp_subset <- (lod_frame %>% mutate(abs_diff = abs(reads - re)) %>% arrange(abs_diff))[1,]
+  growth_lod_readcounts <- c(growth_lod_readcounts, temp_subset$count)
+  growth_lod_freqs <- c(growth_lod_freqs, temp_subset$freq)
+}
+growth_lod_dataframe <- data.frame("reads" = growth_readcounts, "count" = growth_lod_readcounts, "freq" = growth_lod_freqs)
+
+## Now figure out which data points were below the limit of detection
+growth[is.na(growth)] <- 0
+
+growth_raw_counts2 <- data.frame("variant" = growth$variant,
+                           "lib" = growth$lib < growth_lod_readcounts[1],
+                           "r3" = growth$r3_growth < growth_lod_readcounts[2],
+                           "r4" = growth$r4_growth < growth_lod_readcounts[3],
+                           "r5" = growth$r5_growth < growth_lod_readcounts[4])
+
+## These were the total number of variants below the limit of detection in each endo sequencing run:
+colSums(growth_raw_counts2[,c("lib","r3","r4","r5")])
+
+## Now calculate endo frequencies, and for endos below the limit of detection, give them the limit of detection frequency value
+growth_freq = growth %>% mutate(flib = lib/growth_readcounts$total_count[1],
+                                      fr3 = r3_growth/growth_readcounts$total_count[2],
+                                      fr4 = r4_growth/growth_readcounts$total_count[3],
+                                      fr5 = r5_growth/growth_readcounts$total_count[4])
+
+growth_freq[growth_raw_counts2$lib == T,"flib"] <- growth_lod_freqs[1]
+growth_freq[growth_raw_counts2$r3 == T,"fr3"] <- growth_lod_freqs[2]
+growth_freq[growth_raw_counts2$r4 == T,"fr4"] <- growth_lod_freqs[3]
+growth_freq[growth_raw_counts2$r5 == T,"fr5"] <- growth_lod_freqs[4]
+
+growth_freq$r3_ratio <- growth_freq$fr3 / growth_freq$flib
+growth_freq$r4_ratio <- growth_freq$fr4 / growth_freq$flib
+growth_freq$r5_ratio <- growth_freq$fr5 / growth_freq$flib
+
+growth_freq$growth_ratio <- 10^rowMeans(log10(growth_freq[,c("r3_ratio", "r4_ratio", "r5_ratio")]))
+
+
+growth_freq1 = growth_freq %>% select(variant, growth_ratio)
+growth_freq1[growth_freq1 == "Z0Z"] <- "WT"
+
+prev_scores = read.csv("data/prev_survival_scores.csv") %>% select(variant, endo_ratio)
+
+growth = left_join(variant_name, growth_freq1)
+growth = left_join(growth, prev_scores)
+growth = growth %>% mutate(log_growth_ratio = log10(growth_ratio),
+                               log_endo_ratio = log10(endo_ratio))
+
+all_scores  = full_join(all_scores, growth)
+
+#Figure 3A
+growth_survival_hist = ggplot()+
+  geom_histogram(data = all_scores, aes(x= log_endo_ratio), alpha = 0.5, fill = "blue", color = "black", bins = 15, linetype = "dashed")+
+  geom_histogram(data = all_scores, aes(x= log_growth_ratio), alpha = 0.5, fill = "grey", color = "black", bins = 15) +
+  geom_vline(xintercept = 0.05, alpha = 0.5)+NULL; growth_survival_hist
+ggsave("plots/growth_survival_hist.pdf", growth_survival_hist, height = 1.5, width = 2.5)
+
+#Figure 3B
+growth_survival_dotplot = ggplot()+
+  labs(x= "Survival score", y= "Growth score")+
+  geom_point(data = all_scores, aes(x= log_endo_ratio, y= log_growth_ratio), alpha = 0.3, shape = 16, size = 1)+ 
+  theme(legend.position = "none") +NULL; growth_survival_dotplot
+ggsave("plots/growth_survival_dotplot.pdf", growth_survival_dotplot, height = 1.75, width = 2)
+
+cor.test(all_scores$log_endo_ratio, all_scores$log_growth_ratio, method = "spearman")
+
+#Figure 3C
+mis_positional <- all_scores %>% group_by(start, position) %>% summarize(ca_score = mean(ca_score, na.rm = T), log_growth_ratio = mean(log_growth_ratio, na.rm = T), log_endo_ratio = mean(log_endo_ratio, na.rm = T)) %>% mutate(label1 = paste0(start,position))
+
+mis_positional = mis_positional %>% mutate(domain = case_when(position %in% c(63:75) ~ "a1",
+                                                              position %in% c(76:87) ~ "loop",
+                                                              position %in% c(88:98) ~ "a2"))
+
+positional_survival_growth_plot = ggplot() +
+  labs(x= "Survival score", y= "Growth score")+
+  geom_point(data = mis_positional, aes(x= log_endo_ratio, y= log_growth_ratio), alpha = 0.5, shape = 16, size = 1)+ 
+  geom_text_repel(data = mis_positional, aes(x= log_endo_ratio, y= log_growth_ratio, label = position), size = 2.5, box.padding = 0, segment.alpha = 0.4, max.overlaps = Inf) +
+  theme(legend.position = "none")+NULL; positional_survival_growth_plot; ggsave(file = "Plots/positional_survival_growth_plot.pdf", positional_survival_growth_plot, height = 1.75, width = 2)
+
+cor(mis_positional$log_growth_ratio, mis_positional$log_endo_ratio, use = "complete", method = "spearman")
+
+```
+
+#Dataframe of survival score (endo_ratio), growth score (growth_ratio), and calcium influx score (ca_score) - all_scores
+
+```{r Supplement Fig 3}
+
+all_scores_syn = all_scores %>% filter(type == "syn")
+
+#checking if ca influx scores from DMS correlate with previous functional scores
+
+#ecr = CaMPARI2 ratios from bulk assays
+all_data_vus = left_join(all_data_vus, all_scores)
+all_data_vus = all_data_vus %>% mutate(class = case_when(variant %in% c("E66K", "A67T", "R69C", "R69H" ,"N80S", "E90D") ~ "gnomad",
+                                       variant %in% c("K73R", "F91Y", "D76G", "G81C", "D84N") ~ "VUS",
+                                       variant %in% c("H72Q","D84G") ~ "mild_path",
+                                       variant %in% c("L92V","G81D","D84E","L96V") ~ "severe_path",
+                                       variant == "L74P" ~ "immune_dys"))
+
+campari_old_new = ggplot()+
+  geom_point(data = all_data_vus, aes(x= campari, y= ca_score, color = class), alpha = 0.5) +
+  geom_text_repel(data = all_data_vus, aes(x= campari, y= ca_score, color = class, label = variant))+
+  scale_color_manual(values = c("gnomad" = "#E76BF3", "VUS" = "black", "mild_path" = "#A3A500",
+                                "severe_path" = "#00BF7D", "immune_dys" = "#F8766D"))+
+  theme(legend.position = "none")+NULL; campari_old_new
+
+ggsave("plots/campari_old_new.pdf", campari_old_new, height = 2, width = 3.5)
+  
+cor.test(all_data_vus$campari, all_data_vus$ca_score, method = "spearman")
+
+wt_score = all_scores %>% filter(variant == "WT")
+```
+
+```{r Make a dataframe we can use for annotating the heatmaps}
+
+wt_seq <- "LSFEAVRNIHKLMDDDANGDVDVEESDEFLREDLNY"
+
+annotation_df <- data.frame("position" = seq(63,98))
+annotation_df$start <- NA
+for(x in 1:nrow(annotation_df)){annotation_df$start[x] <- substr(wt_seq,x,x)}
+
+annotation_df2 <- annotation_df
+
+main_chain_coordination_res <- c(82)
+side_chain_coordination_res <- c(76, 78, 80, 87)
+
+annotation_df3 <- merge(annotation_df2, data.frame("position" = side_chain_coordination_res, "coord" = 1), all.x = T)
+annotation_df3[annotation_df3$position %in% main_chain_coordination_res,"coord"] <- 1.1
+
+helix <- c(seq(64,73),seq(89,97))
+annotation_df4 <- merge(annotation_df3, data.frame("position" = helix, "helix" = 1), all.x = T)
+annotation_df4[is.na(annotation_df4)] <- 0
+annotation_df4$position = as.character(annotation_df4$position)
+
+## Make another dataframe of all posssible variants for helping with data frames of missing values
+
+all_res_list <- c("_","P","C","M","T","S","G","A","V","I","L","F","Y","W","H","K","R","N","Q","D","E")
+all_variant_list <- c()
+
+for(x in 1:nrow(annotation_df4)){
+  for(y in all_res_list){
+    all_variant_list <- c(all_variant_list,temp_start_pos <- paste0(annotation_df4$start[x], annotation_df4$position[x], y))
+  }
+}
+
+all_variant_df <- data.frame("variant" = all_variant_list)
+
+positional_scores = all_scores %>% filter(type == "mis") %>% group_by(position) %>% mutate(ca_positional = 10^mean(log10(ca_score), na.rm = T))
+positional_scores$position = as.character(positional_scores$position)
+
+```
+
+```{r Supplement Fig 2 Growth score heatmap}
+
+growth_heatmap = all_scores %>% select(position, log_growth_ratio, variant, start, end, type)
+median(all_scores$log_growth_ratio, na.rm = T)
+all_scores$position = as.character(all_scores$position)
+all_scores_syn$position = as.character(all_scores_syn$position)
+growth_heatmap$position = as.character(growth_heatmap$position)
+all_scores_syn$end = factor(all_scores_syn$end, levels = rev(c("_","R","H","K","D","E","S","T","N","Q","A","V","I","L","M","F","Y","W","C","G","P")))
+growth_heatmap$end = factor(growth_heatmap$end, levels = rev(c("Geomean (mis)", "Helix", "Coord", "WT res", "_","R","H","K","D","E","S","T","N","Q","A","V","I","L","M","F","Y","W","C","G","P")))
+all_scores$end = factor(all_scores$end, levels = rev(c("_","R","H","K","D","E","S","T","N","Q","A","V","I","L","M","F","Y","W","C","G","P")))
+
+growth_heatmap <- rbind(growth_heatmap,
+                         data.frame("position" = annotation_df4$position, "log_growth_ratio" = 1, "variant" = NA, "start" = annotation_df4$start, "end" = "WT res", "type" = "annot"),
+                         data.frame("position" = annotation_df4$position, "log_growth_ratio" = annotation_df4$coord, "variant" = NA, "start" = "Coord", "end" = "Coord", "type" = "annot"),
+                         data.frame("position" = annotation_df4$position, "log_growth_ratio" = annotation_df4$helix, "variant" = NA, "start" = "Helix", "end" = "Helix", "type" = "annot"), 
+                          data.frame("position" = mis_positional$position, "log_growth_ratio" = mis_positional$log_growth_ratio, "variant" = NA, "start" = "Geomean (mis)", "end" = "Geomean (mis)", "type" = "annot")) %>% distinct()
+
+
+
+
+
+growth_heatmap$end = factor(growth_heatmap$end, levels = rev(c("Geomean (mis)", "Helix", "Coord", "WT res", "_","R","H","K","D","E","S","T","N","Q","A","V","I","L","M","F","Y","W","C","G","P")))
+all_scores$end = factor(all_scores$end, levels = rev(c("_","R","H","K","D","E","S","T","N","Q","A","V","I","L","M","F","Y","W","C","G","P")))
+
+heatmap_growth = ggplot()+ 
+  geom_tile(data = all_scores %>% filter(position != 0), aes(x= position, y = end, fill = log_growth_ratio)) + scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = median(unlist(all_scores %>% filter(type == "syn") %>% select(log_growth_ratio)), na.rm = T))+
+  geom_point(data = all_scores_syn %>% filter(position != 0), aes(x= position, y= end), size = 0.5)+
+  geom_text(data = growth_heatmap %>% filter(end == "WT res" & log_growth_ratio == 1 & position != 0), aes(x = position, y = end, label = start), size = 2) +
+  geom_text(data = growth_heatmap %>% filter(end == "Coord" & log_growth_ratio == 1 & position != 0), aes(x = position, y = end), label = "S", color = "darkgreen", size = 2) +
+  geom_text(data = growth_heatmap %>% filter(end == "Coord" & log_growth_ratio == 1.1 & position != 0), aes(x = position, y = end), label = "M", color = "darkgreen", size = 2) +
+  geom_text(data = growth_heatmap %>% filter(end == "Helix" & log_growth_ratio == 1 & position != 0), aes(x = position, y = end), label = "H", color = "purple", size = 2) +
+  geom_tile(data = growth_heatmap %>% filter(end == "Geomean (mis)" & position != 0), aes(x= position, y= end, fill = log_growth_ratio))+
+  labs(x= "Position", y= "Residue Change", fill = "Growth Score") + theme(legend.position = "bottom") + theme(text = element_text(size = 6)) +
+  NULL; heatmap_growth; ggsave("plots/heatmap_growth.pdf", heatmap_growth, height = 2.2, width = 4.2)
+
+```
+
+```{r Figure 3E,F - calcium DMS score heatmap}
+#campari score heatmap
+
+# all_scores$position = as.character(all_scores$position)
+# all_scores$end = factor(all_scores$end, levels = rev(c("_","R","H","K","D","E","S","T","N","Q","A","V","I","L","M","F","Y","W","C","G","P")))
+# 
+# all_scores_syn$position = as.character(all_scores_syn$position)
+# all_scores_syn$end = factor(all_scores_syn$end, levels = rev(c("_","R","H","K","D","E","S","T","N","Q","A","V","I","L","M","F","Y","W","C","G","P")))
+
+calcium_heatmap = all_scores %>% select(position, ca_score, variant, start, end, type)
+# calcium_heatmap = calcium_heatmap %>% group_by(position) %>% mutate(geomean_pos = 10^mean(log10(final_score), na.rm = T))
+
+calcium_heatmap <- rbind(calcium_heatmap,
+                         data.frame("position" = annotation_df4$position, "ca_score" = 1, "variant" = NA, "start" = annotation_df4$start, "end" = "WT res", "type" = "annot"),
+                         data.frame("position" = annotation_df4$position, "ca_score" = annotation_df4$coord, "variant" = NA, "start" = "Coord", "end" = "Coord", "type" = "annot"),
+                         data.frame("position" = annotation_df4$position, "ca_score" = annotation_df4$helix, "variant" = NA, "start" = "Helix", "end" = "Helix", "type" = "annot"), 
+                          data.frame("position" = positional_scores$position, "ca_score" = positional_scores$ca_positional, "variant" = NA, "start" = "Geomean (mis)", "end" = "Geomean (mis)", "type" = "annot"))
+
+calcium_heatmap$end = factor(calcium_heatmap$end, levels = rev(c("Geomean (mis)", "Helix", "Coord", "WT res", "_","R","H","K","D","E","S","T","N","Q","A","V","I","L","M","F","Y","W","C","G","P")))
+
+median(all_scores$ca_score, na.rm = T)
+
+
+
+heatmap_calcium_influx = ggplot()+ 
+  geom_tile(data = all_scores, aes(x= position, y = end, fill = ca_score)) + scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0.6)+
+  geom_point(data = all_scores_syn, aes(x= position, y= end), size = 0.5)+
+  geom_text(data = calcium_heatmap %>% filter(end == "WT res" & ca_score == 1), aes(x = position, y = end, label = start), size = 2) +
+  geom_text(data = calcium_heatmap %>% filter(end == "Coord" & ca_score == 1), aes(x = position, y = end), label = "S", color = "darkgreen", size = 2) +
+  geom_text(data = calcium_heatmap %>% filter(end == "Coord" & ca_score == 1.1), aes(x = position, y = end), label = "M", color = "darkgreen", size = 2) +
+  geom_text(data = calcium_heatmap %>% filter(end == "Helix" & ca_score == 1), aes(x = position, y = end), label = "H", color = "purple", size = 2) +
+  geom_tile(data = calcium_heatmap %>% filter(end == "Geomean (mis)"), aes(x= position, y= end, fill = ca_score))+
+  labs(x= "Position", y= "Residue Change", fill = "Enrichment Score") + theme(legend.position = "none") + theme(text = element_text(size = 6)) +
+  NULL; heatmap_calcium_influx
+ggsave("plots/heatmap_calcium_influx.pdf", heatmap_calcium_influx, height = 2.2, width = 4.2)
+
+
+#mis/syn/non histogram
+
+score_histogram = ggplot()+ labs(x= "Calcium influx scores", y = "Count")+
+  geom_histogram(data = all_scores, aes(x= ca_score), fill = "grey", color = "black", alpha = 0.2, bins = 15)+ scale_x_continuous(limits = c(0.3, 1))+
+  geom_histogram(data = all_scores %>% filter(type == "syn"), aes(x = ca_score), fill = "green", color = "black", bins = 15)+
+  geom_histogram(data = all_scores %>% filter(type == "non"), aes(x = ca_score), fill = "blue", color = "black", bins = 15) +
+  geom_vline(xintercept = wt_score$ca_score, alpha = 0.5, linetype = "dashed")+NULL; score_histogram
+
+ggsave("plots/score_histogram.pdf", height = 2, width = 2.5)
+
+```
+
+```{r Figure 4}
+#Figure 4A
+#clinvar data accessed in May 2026
+clinvar_vus = read.csv("data/clinvar_vus_may26.csv")
+clinvar_vus = left_join(clinvar_vus, all_scores)
+clinvar_vus <- clinvar_vus %>% mutate(log_endo_ratio = log10(endo_ratio), log_growth_ratio = log10(growth_ratio))
+
+snv = read.delim("data/STIM1_SNV_table.tsv", header = T) %>% filter(position %in% c(63:98))
+snv$position = as.character(snv$position)
+snv_scores = left_join(snv, all_scores)
+syn_snv = snv_scores %>% filter(type == "syn")
+
+all_scores = all_scores %>% mutate(snv = case_when(all_scores$variant %in% snv_scores$variant ~ "yes",
+                                                   !all_scores$variant %in% snv_scores$variant ~ "no"))
+
+#GnomAD accessed October 2026
+gnomad_ef = read.csv("data/gnomad_stim1.csv")
+gnomad_ef = left_join(gnomad_ef, all_scores)
+
+median((all_scores %>% filter(snv == "yes"))$ca_score, na.rm = T)
+median((all_scores %>% filter(snv == "no"))$ca_score, na.rm = T)
+median((all_scores %>% filter(snv == "yes"))$log_endo_ratio, na.rm = T)
+median((all_scores %>% filter(snv == "no"))$log_endo_ratio, na.rm = T)
+median((all_scores %>% filter(snv == "yes"))$log_growth_ratio, na.rm = T)
+median((all_scores %>% filter(snv == "no"))$log_growth_ratio, na.rm = T)
+
+all_scores_medians <- all_scores %>% group_by(snv) %>% summarize(ca_score = median(ca_score, na.rm = T), log_endo_ratio = median(log_endo_ratio, na.rm = T), log_growth_ratio = median(log_growth_ratio, na.rm = T)) %>% pivot_longer(c(ca_score, log_endo_ratio, log_growth_ratio))
+
+all_scores_melt <- all_scores %>% pivot_longer(c(ca_score, log_endo_ratio, log_growth_ratio))
+
+all_scores_melt$name <- factor(all_scores_melt$name, levels = c("ca_score","log_growth_ratio","log_endo_ratio"))
+all_scores_medians$name <- factor(all_scores_medians$name, levels = c("ca_score","log_growth_ratio","log_endo_ratio"))
+
+
+
+all_scores_medians_plot <- ggplot() + 
+  geom_histogram(data = all_scores_melt, aes(x = value), alpha = 0.4, color = "black") +
+  facet_grid(cols = vars(name), rows = vars(snv), scales = "free") +
+  geom_vline(data = all_scores_medians, aes(xintercept = value, color = snv)) + theme(legend.position = "none")+
+  labs(x = "Score", y = "Number of variants")+NULL; all_scores_medians_plot; ggsave(file = "Plots/all_scores_medians_plot.pdf", all_scores_medians_plot, height = 2, width = 3.5)
+
+
+
+clinvar_vus0 <- rbind((all_scores %>% filter(variant %in% c(gnomad_ef$variant)) %>% 
+                         mutate(class = "gnomAD"))[,c("variant","class","ca_score","log_endo_ratio","log_growth_ratio")], (clinvar_vus %>% filter(!(variant %in% gnomad_ef$variant)))[,c("variant","class","ca_score","log_endo_ratio","log_growth_ratio")])
+
+clinvar_vus2 <- merge(clinvar_vus0, pca_vus_results[,c("variant","allele_freq")], by = "variant", all.x = T)
+
+for(x in 1:nrow(clinvar_vus2)){
+  if(is.na(clinvar_vus2$allele_freq[x])){
+    clinvar_vus2$allele_freq[x] <- "no"
+  }
+  if(clinvar_vus2$class[x] %in% c("LP", "path")){
+    clinvar_vus2$class[x] <- "pathogenic"
+  }
+  if(clinvar_vus2$class[x] == "VUS" & clinvar_vus2$allele_freq[x] == "yes"){
+    clinvar_vus2$class[x] <- "GnomAD"
+  }
+}
+
+clinvar_vus2$class <- factor(clinvar_vus2$class, levels = c("VUS","GnomAD","pathogenic"))
+clinvar_vus2 <- clinvar_vus2 %>% distinct()
+
+clinvar_vus2[clinvar_vus2$variant %in% c(gnomad_ef$variant,"K73R"),"class"] <- "GnomAD"
+clinvar_vus2[clinvar_vus2$variant %in% c("Y98C"),"class"] <- "pathogenic"
+
+# wt <- all_scores %>% filter(start == "Z")
+
+
+
+#Figure 4B
+
+#"GnomAD=Green; Pathog=Red; VUS=Purple \n Syn=lightgreen; Nonsense=lightblue SNV=outlined"
+all_campari_growth_plot = ggplot()+
+  labs(x= "Calcium influx", y= "Growth score")+
+  # scale_x_continuous(limits = c(min(clinvar_vus2$ca_score)-0.085,max(clinvar_vus2$ca_score)*1.1)) +
+  scale_y_continuous(limits = c(min(clinvar_vus2$log_growth_ratio)*1.5,max(clinvar_vus2$log_growth_ratio)*1)) +
+  # geom_point(data = all_scores %>% filter(type == "non"), aes(x= ca_score, y= log_growth_ratio), color = "lightblue", shape = 16)+ 
+  geom_point(data = all_scores, aes(x= ca_score, y= log_growth_ratio), alpha = 0.2, color = "grey70", shape = 16, size = 1)+
+  geom_point(data = clinvar_vus2, aes(x= ca_score, y= log_growth_ratio, color = class), size = 1)+ 
+  geom_point(data = wt_score, aes(x= ca_score, y= log_growth_ratio), size = 1) + 
+  geom_text_repel(data = wt_score, aes(x= ca_score, y= log_growth_ratio, label = variant), size = 3)+
+  geom_point(data = snv_scores, aes(x= ca_score, y= log_growth_ratio), shape = 1, alpha = 0.2, size = 1)+ 
+  # geom_point(data = all_scores %>% filter(type == "syn"), aes(x= ca_score, y= log_growth_ratio), alpha = 0.3, color = "lightgreen", shape = 16)+ 
+  scale_color_manual(values = c("GnomAD" = "green4", "pathogenic" = "red", "VUS" = "purple")) +
+  geom_hline(yintercept = 0, alpha = 0.2) +
+  geom_vline(xintercept = 0.5, alpha = 0.4, linetype = "dotted") +
+  # geom_vline(xintercept = 0.7, alpha = 0.4) +
+  geom_text_repel(data = clinvar_vus2, aes(x= ca_score, y= log_growth_ratio, label = variant, color = class), size = 3) +
+  theme(legend.position = "none") +
+  NULL; all_campari_growth_plot; ggsave(file = "Plots/all_campari_growth_plot.pdf", all_campari_growth_plot, height = 2.75, width = 3.75)
+
+#Figure 4C
+
+all_scores1_growth_by_calcium <- rbind((all_scores %>% filter(ca_score > 0.7) %>% mutate(subset1 = "high_ca")),
+                                       (all_scores %>% filter(ca_score < 0.7 & ca_score > 0.5) %>% mutate(subset1 = "med_ca")),
+                                       (all_scores %>% filter(ca_score < 0.5) %>% mutate(subset1 = "low_ca")))
+
+all_scores1_growth_by_calcium <- ggplot() + geom_density(data = all_scores1_growth_by_calcium, aes(x = log_growth_ratio, color = subset1)) +
+  #facet_grid(rows = vars(subset1)) +
+  scale_color_manual(values = c("high_ca" = "red", "med_ca" = "grey40", "low_ca" = "blue")) +
+  scale_x_continuous(limits = c(min(clinvar_vus2$log_growth_ratio)*1.5,max(clinvar_vus2$log_growth_ratio)*1)) +
+  geom_vline(xintercept = 0, alpha = 0.5)+
+  labs(x = "Growth scores", y= NULL) + 
+  # scale_x_reverse(limits = c(1, -1.5))+
+  theme(legend.position = "none") + theme(panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.5))+
+  NULL; all_scores1_growth_by_calcium; ggsave(file = "Plots/all_scores1_growth_by_calcium.pdf", all_scores1_growth_by_calcium, height = 1, width = 2.5)
+
+all_scores1_calcium_by_growth <- rbind((all_scores %>% filter(log_growth_ratio > 0) %>% mutate(subset1 = "high_growth")),
+                                       (all_scores %>% filter(log_growth_ratio < 0) %>% mutate(subset1 = "low_growth")))
+
+all_scores1_calcium_by_growth_plot <- ggplot() + geom_density(data = all_scores1_calcium_by_growth, aes(x = ca_score, color = subset1)) +
+  #facet_grid(rows = vars(subset1)) +
+  scale_color_manual(values = c("high_growth" = "red", "low_growth" = "blue")) +
+  scale_x_continuous(limits = c(min(clinvar_vus2$ca_score)-0.085,max(clinvar_vus2$ca_score)*1.1)) +
+  labs(y = NULL, x = "Calcium score") +
+  geom_vline(xintercept = 0.5, linetype = "dotted", alpha = 0.5)+
+  geom_vline(xintercept = 0.7, alpha = 0.5)+
+  theme(legend.position = "none") + theme(panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.5))+
+  NULL; all_scores1_calcium_by_growth_plot; ggsave(file = "Plots/all_scores1_calcium_by_growth_plot.pdf", all_scores1_calcium_by_growth_plot, height = 1, width = 2.5)
+
+
+#Figure 4D
+
+all_scores1_low_ca <- all_scores %>% filter(ca_score < 0.5 & type == "mis" & snv == "yes")
+all_scores1_highgrowth <- all_scores %>% filter(log_growth_ratio > 0)
+lm(all_scores1_highgrowth$ca_score ~ all_scores1_highgrowth$log_growth_ratio)
+
+mis_positional <- all_scores %>% group_by(start, position) %>% summarize(ca_score = mean(ca_score, na.rm = T), log_growth_ratio = mean(log_growth_ratio, na.rm = T), log_endo_ratio = mean(log_endo_ratio, na.rm = T)) %>% mutate(label1 = paste0(start,position))
+
+mis_positional = mis_positional %>% mutate(domain = case_when(position %in% c(63:75) ~ "a1",
+                                                              position %in% c(76:87) ~ "loop",
+                                                              position %in% c(88:98) ~ "a2"))
+
+positional_campari_growth_plot = ggplot() +
+  labs(x= "Calcium influx", y= "Growth score")+
+  geom_hline(yintercept = 0, alpha = 0.4) +
+  geom_vline(xintercept = 0.7, alpha = 0.4) +
+  geom_point(data = mis_positional, aes(x= ca_score, y= log_growth_ratio, color = domain), shape = 16)+ 
+  geom_text_repel(data = mis_positional, aes(x= ca_score, y= log_growth_ratio, label = label1, color = domain), size = 3, box.padding = 0, segment.alpha = 0.4, max.overlaps = Inf) +
+  theme(legend.position = "none")+NULL; positional_campari_growth_plot; ggsave(file = "Plots/positional_campari_growth_plot.pdf", positional_campari_growth_plot, height = 2.5, width = 3.75)
+
+```
+
+```{r Figure 5}
+
+alpha_missense <- read.delim(file = "data/alpha_missense.tsv", header = T, stringsAsFactors = F) %>% mutate(variant = protein_variant)
+
+alpha_missense2 <- merge(alpha_missense[,c("variant","am_pathogenicity","am_class")], all_scores, by = "variant")
+alpha_missense2_clinvar <- merge(alpha_missense2, clinvar_vus2[,c("variant","class")], by = "variant") %>% filter(class %in% c("VUS","GnomAD","pathogenic"))
+
+alphamissense <- alpha_missense2_clinvar #read.delim(file = "Data/250530_AlphaMissense-Search-P35475.tsv", header = T, stringsAsFactors = F)
+alphamissense2 <- alphamissense #merge(alphamissense, gnomad3 %>% mutate(protein.variant = Protein.Consequence), by = "protein.variant")
+
+am2_thresholds <- seq(0,1,0.01)
+am2_roc_df <- data.frame("threshold" = am2_thresholds, "tpr" = NA, "fpr" = NA)
+for(x in 1:nrow(am2_roc_df)){
+  temp_threshold <- am2_roc_df$threshold[x]
+  pathog_true_pos <- nrow(subset(alphamissense2, am_pathogenicity >= temp_threshold & class == "pathogenic"))
+  pathog_false_neg <- nrow(subset(alphamissense2, am_pathogenicity < temp_threshold & class == "pathogenic"))
+  pathog_false_pos <- nrow(subset(alphamissense2, am_pathogenicity >= temp_threshold & class == "GnomAD"))
+  pathog_true_neg <- nrow(subset(alphamissense2, am_pathogenicity < temp_threshold & class == "GnomAD"))
+  am2_roc_df$tpr[x] <- pathog_true_pos / (pathog_true_pos + pathog_false_neg)
+  am2_roc_df$fpr[x] <- pathog_false_pos / (pathog_false_pos + pathog_true_neg)
+}
+am2_line <- am2_roc_df %>% arrange(fpr, tpr) %>% select(fpr, tpr) %>% distinct()
+
+roc_pts_am <- bind_rows(data.frame(fpr = 0, tpr = 0), am2_line, data.frame(fpr = 1, tpr = 1)) %>% arrange(fpr, tpr) %>% distinct()
+
+amscore_auc <- sum(diff(roc_pts_am$fpr) * (head(roc_pts_am$tpr, -1) + tail(roc_pts_am$tpr, -1)) / 2)
+
+paste0("AlphaMissense AUC: ", round(amscore_auc, 2))
+
+am2_line_auc <- rbind(am2_line %>% filter(tpr != 1) %>% group_by(tpr) %>% summarize(fpr = max(fpr)) %>% mutate(area = 0),c(1,1,0))
+for(x in 2:nrow(am2_line_auc)){
+  am2_line_auc$area[x] <- (am2_line_auc$tpr[x] - am2_line_auc$tpr[x-1]) * am2_line_auc$fpr[x-1]
+}
+paste0("AUC: ", round(1-(sum(am2_line_auc$area)),2))
+
+##MutPred2
+mutpred <- read.csv("data/mutpred2.csv")
+
+mutpred2 <- merge(mutpred[,c("variant","score")], all_scores, by = "variant")
+mutpred2_clinvar <- merge(mutpred, clinvar_vus2[,c("variant","class")], by = "variant") %>% filter(class %in% c("VUS","GnomAD","pathogenic"))
+
+
+mutpred2_thresholds <- seq(0,1,0.01)
+mutpred2_roc_df <- data.frame("threshold" = mutpred2_thresholds, "tpr" = NA, "fpr" = NA)
+for(x in 1:nrow(mutpred2_roc_df)){
+  temp_threshold <- mutpred2_roc_df$threshold[x]
+  pathog_true_pos <- nrow(subset(mutpred2_clinvar, score >= temp_threshold & class == "pathogenic"))
+  pathog_false_neg <- nrow(subset(mutpred2_clinvar, score < temp_threshold & class == "pathogenic"))
+  pathog_false_pos <- nrow(subset(mutpred2_clinvar, score >= temp_threshold & class == "GnomAD"))
+  pathog_true_neg <- nrow(subset(mutpred2_clinvar, score < temp_threshold & class == "GnomAD"))
+  mutpred2_roc_df$tpr[x] <- pathog_true_pos / (pathog_true_pos + pathog_false_neg)
+  mutpred2_roc_df$fpr[x] <- pathog_false_pos / (pathog_false_pos + pathog_true_neg)
+}
+mutpred2_line <- mutpred2_roc_df %>% arrange(fpr, tpr) %>% select(fpr, tpr) %>% distinct()
+
+roc_pts_mutpred <- bind_rows(data.frame(fpr = 0, tpr = 0), mutpred2_line, data.frame(fpr = 1, tpr = 1)) %>% arrange(fpr, tpr) %>% distinct()
+
+mutpredscore_auc <- sum(diff(roc_pts_mutpred$fpr) * (head(roc_pts_mutpred$tpr, -1) + tail(roc_pts_mutpred$tpr, -1)) / 2)
+
+paste0("Mutpred2 AUC: ", round(mutpredscore_auc, 2))
+
+
+## Envision
+envision <- read.csv(file = "Data/Q13586_envisionData.csv", header = T, stringsAsFactors = F) %>% mutate(variant = Variant)
+
+envision2 <- merge(envision[,c("variant","Envision_predictions")], all_scores, by = "variant")
+envision2_clinvar <- merge(envision2, clinvar_vus2[,c("variant","class")], by = "variant") %>% filter(class %in% c("VUS","GnomAD","pathogenic"))
+
+envision2_thresholds <- seq(0.71,0.99,0.01)
+envision2_roc_df <- data.frame("threshold" = envision2_thresholds, "tpr" = NA, "fpr" = NA)
+for(x in 1:nrow(envision2_roc_df)){
+  temp_threshold <- envision2_roc_df$threshold[x]
+  pathog_true_pos <- nrow(subset(envision2_clinvar, Envision_predictions <= temp_threshold & class == "pathogenic"))
+  pathog_false_neg <- nrow(subset(envision2_clinvar, Envision_predictions > temp_threshold & class == "pathogenic"))
+  pathog_false_pos <- nrow(subset(envision2_clinvar, Envision_predictions <= temp_threshold & class == "GnomAD"))
+  pathog_true_neg <- nrow(subset(envision2_clinvar, Envision_predictions > temp_threshold & class == "GnomAD"))
+  envision2_roc_df$tpr[x] <- pathog_true_pos / (pathog_true_pos + pathog_false_neg)
+  envision2_roc_df$fpr[x] <- pathog_false_pos / (pathog_false_pos + pathog_true_neg)
+}
+envision2_line <- envision2_roc_df %>% arrange(fpr, tpr) %>% select(fpr, tpr) %>% distinct()
+
+roc_pts_envision <- bind_rows(data.frame(fpr = 0, tpr = 0), envision2_line, data.frame(fpr = 1, tpr = 1)) %>% arrange(fpr, tpr) %>% distinct()
+
+envisionscore_auc <- sum(diff(roc_pts_envision$fpr) * (head(roc_pts_envision$tpr, -1) + tail(roc_pts_envision$tpr, -1)) / 2)
+
+paste0("Envision AUC: ", round(envisionscore_auc, 2))
+
+## REVEL
+revel <- read.csv(file = "data/revel_stim1_ef.csv", header = T, stringsAsFactors = F)
+
+revel2 <- merge(revel[,c("variant","REVEL")], all_scores, by = "variant")
+revel2_clinvar <- merge(revel2, clinvar_vus2[,c("variant","class")], by = "variant") %>% filter(class %in% c("VUS","GnomAD","pathogenic"))
+
+revel2_thresholds <- seq(0,1,0.01)
+revel2_roc_df <- data.frame("threshold" = revel2_thresholds, "tpr" = NA, "fpr" = NA)
+for(x in 1:nrow(revel2_roc_df)){
+  temp_threshold <- revel2_roc_df$threshold[x]
+  pathog_true_pos <- nrow(subset(revel2_clinvar, REVEL >= temp_threshold & class == "pathogenic"))
+  pathog_false_neg <- nrow(subset(revel2_clinvar, REVEL < temp_threshold & class == "pathogenic"))
+  pathog_false_pos <- nrow(subset(revel2_clinvar, REVEL >= temp_threshold & class == "GnomAD"))
+  pathog_true_neg <- nrow(subset(revel2_clinvar, REVEL < temp_threshold & class == "GnomAD"))
+  revel2_roc_df$tpr[x] <- pathog_true_pos / (pathog_true_pos + pathog_false_neg)
+  revel2_roc_df$fpr[x] <- pathog_false_pos / (pathog_false_pos + pathog_true_neg)
+}
+revel2_line <- revel2_roc_df %>% arrange(fpr, tpr) %>% select(fpr, tpr) %>% distinct()
+
+roc_pts_revel <- bind_rows(data.frame(fpr = 0, tpr = 0), revel2_line, data.frame(fpr = 1, tpr = 1)) %>% arrange(fpr, tpr) %>% distinct()
+
+revelscore_auc <- sum(diff(roc_pts_revel$fpr) * (head(roc_pts_revel$tpr, -1) + tail(roc_pts_revel$tpr, -1)) / 2)
+
+paste0("revel AUC: ", round(revelscore_auc, 2))
+
+#Supplement 4
+
+alpha_missense_clinvar <- ggplot() + scale_fill_manual(values = c("pathogenic" = "red", "VUS" = "purple", "GnomAD" = "lightgreen")) +
+  scale_color_manual(values = c("pathogenic" = "red", "VUS" = "purple", "GnomAD" = "lightgreen")) +
+  geom_histogram(data = alpha_missense2_clinvar, aes(x = am_pathogenicity, fill = class, color = class), alpha = 0.5, binwidth = 0.05) +
+  labs(x = "Alphamissense score", y = "Number of variants") + theme(legend.position = "none")+
+  NULL; alpha_missense_clinvar; ggsave(file = "Plots/alpha_missense_clinvar.pdf", alpha_missense_clinvar, height = 1.5, width = 2.5)
+
+envision_missense_clinvar = ggplot() + scale_fill_manual(values = c("pathogenic" = "red", "VUS" = "purple", "GnomAD" = "lightgreen")) +
+  scale_color_manual(values = c("pathogenic" = "red", "VUS" = "purple", "GnomAD" = "lightgreen")) +
+  geom_histogram(data = envision2_clinvar, aes(x = Envision_predictions, fill = class, color = class), alpha = 0.5, binwidth = 0.05) +
+  labs(x = "Envision score", y = "Number of variants") + theme(legend.position = "none")+
+  NULL;
+ggsave("plots/envision_missense_clinvar.pdf", envision_missense_clinvar, height = 1.5, width = 2.5)
+
+mutpred2_missense_clinvar = ggplot() + scale_fill_manual(values = c("pathogenic" = "red", "VUS" = "purple", "GnomAD" = "lightgreen")) +
+  scale_color_manual(values = c("pathogenic" = "red", "VUS" = "purple", "GnomAD" = "lightgreen")) +
+  geom_histogram(data = mutpred2_clinvar, aes(x = score, fill = class, color = class), alpha = 0.5, binwidth = 0.05) +
+  labs(x = "MutPred2 score", y = "Number of variants") + theme(legend.position = "none")+
+  NULL; mutpred2_missense_clinvar
+ggsave("plots/mutpred2_missense_clinvar.pdf", mutpred2_missense_clinvar, height = 1.5, width = 2.5)
+
+revel_missense_clinvar = ggplot() + scale_fill_manual(values = c("pathogenic" = "red", "VUS" = "purple", "GnomAD" = "lightgreen")) +
+  scale_color_manual(values = c("pathogenic" = "red", "VUS" = "purple", "GnomAD" = "lightgreen")) +
+  geom_histogram(data = revel2_clinvar, aes(x = REVEL, fill = class, color = class), alpha = 0.5, binwidth = 0.05) +
+  labs(x = "revel score", y = "Number of variants") + theme(legend.position = "none")+
+  NULL; revel_missense_clinvar
+ggsave("plots/revel_missense_clinvar.pdf", revel_missense_clinvar, height = 1.5, width = 2.5)
+
+
+
+#Figure 5A
+calcium_clinvar <- ggplot() + scale_fill_manual(values = c("pathogenic" = "red", "VUS" = "purple", "GnomAD" = "lightgreen")) +
+  scale_color_manual(values = c("pathogenic" = "red", "VUS" = "purple", "GnomAD" = "lightgreen")) +
+  geom_histogram(data = alpha_missense2_clinvar, aes(x = ca_score, fill = class, color = class), alpha = 0.5, bins = 15) +
+  labs(x = "Calcium score", y = "Number of variants") +
+  geom_vline(xintercept = mean(all_scores_syn$ca_score, na.rm = T), alpha = 0.5, linetype = "dashed") + theme(legend.position = "none")+
+  NULL; calcium_clinvar; ggsave(file = "Plots/calcium_clinvar.pdf", calcium_clinvar, height = 1, width = 2.5)
+
+growth_clinvar <- ggplot() + scale_fill_manual(values = c("pathogenic" = "red", "VUS" = "purple", "GnomAD" = "lightgreen")) +
+  scale_color_manual(values = c("pathogenic" = "red", "VUS" = "purple", "GnomAD" = "lightgreen")) +
+  geom_histogram(data = alpha_missense2_clinvar, aes(x = log_growth_ratio, fill = class, color = class), alpha = 0.5, bins = 15) +
+  labs(x = "growth score", y = "Number of variants") +
+  geom_vline(xintercept = mean(all_scores_syn$log_growth_ratio, na.rm = T), alpha = 0.5, linetype = "dashed") + theme(legend.position = "none")+
+  NULL; growth_clinvar; ggsave(file = "Plots/growth_clinvar.pdf", growth_clinvar, height = 1, width = 2.5)
+
+survival_clinvar <- ggplot() + scale_fill_manual(values = c("pathogenic" = "red", "VUS" = "purple", "GnomAD" = "lightgreen")) +
+  scale_color_manual(values = c("pathogenic" = "red", "VUS" = "purple", "GnomAD" = "lightgreen")) +
+  geom_histogram(data = alpha_missense2_clinvar, aes(x = log_endo_ratio, fill = class, color = class), alpha = 0.5, bins = 15) +
+  labs(x = "survival score", y = "Number of variants") +
+  geom_vline(xintercept = mean(all_scores_syn$log_endo_ratio, na.rm = T), alpha = 0.5, linetype = "dashed") + theme(legend.position = "none")+
+  NULL; survival_clinvar; ggsave(file = "Plots/survival_clinvar.pdf", survival_clinvar, height = 1, width = 2.5)
+
+#Figure 5B
+
+## Calcium score ROC curve
+cascore_thresholds <- seq(0.35,0.9,0.01)
+cascore_roc_df <- data.frame("threshold" = cascore_thresholds, "tpr" = NA, "fpr" = NA)
+for(x in 1:nrow(cascore_roc_df)){
+  temp_threshold <- cascore_roc_df$threshold[x]
+  pathog_true_pos <- nrow(subset(clinvar_vus2, ca_score >= temp_threshold & class == "pathogenic"))
+  pathog_false_neg <- nrow(subset(clinvar_vus2, ca_score < temp_threshold & class == "pathogenic"))
+  pathog_false_pos <- nrow(subset(clinvar_vus2, ca_score >= temp_threshold & class == "GnomAD"))
+  pathog_true_neg <- nrow(subset(clinvar_vus2, ca_score < temp_threshold & class == "GnomAD"))
+  cascore_roc_df$tpr[x] <- pathog_true_pos / (pathog_true_pos + pathog_false_neg)
+  cascore_roc_df$fpr[x] <- pathog_false_pos / (pathog_false_pos + pathog_true_neg)
+}
+cascore_line <- cascore_roc_df %>% arrange(fpr, tpr) %>% select(fpr, tpr) %>% distinct()
+
+roc_pts_ca <- bind_rows(data.frame(fpr = 0, tpr = 0), cascore_line, data.frame(fpr = 1, tpr = 1)) %>% arrange(fpr, tpr) %>% distinct()
+
+cascore_auc <- sum(diff(roc_pts_ca$fpr) * (head(roc_pts_ca$tpr, -1) + tail(roc_pts_ca$tpr, -1)) / 2)
+
+paste0("Calcium influx score AUC: ", round(cascore_auc, 2))
+
+
+## Survival ROC curve
+survivalscore_thresholds <- seq(-1.52,0.36,0.01)
+survivalscore_roc_df <- data.frame("threshold" = survivalscore_thresholds, "tpr" = NA, "fpr" = NA)
+for(x in 1:nrow(survivalscore_roc_df)){
+  temp_threshold <- survivalscore_roc_df$threshold[x]
+  pathog_true_pos <- nrow(subset(clinvar_vus2, log_endo_ratio <= temp_threshold & class == "pathogenic"))
+  pathog_false_neg <- nrow(subset(clinvar_vus2, log_endo_ratio > temp_threshold & class == "pathogenic"))
+  pathog_false_pos <- nrow(subset(clinvar_vus2, log_endo_ratio <= temp_threshold & class == "GnomAD"))
+  pathog_true_neg <- nrow(subset(clinvar_vus2, log_endo_ratio > temp_threshold & class == "GnomAD"))
+  survivalscore_roc_df$tpr[x] <- pathog_true_pos / (pathog_true_pos + pathog_false_neg)
+  survivalscore_roc_df$fpr[x] <- pathog_false_pos / (pathog_false_pos + pathog_true_neg)
+}
+survivalscore_line <- survivalscore_roc_df %>% arrange(fpr, tpr) %>% select(fpr, tpr) %>% distinct()
+
+roc_pts_sur <- bind_rows(data.frame(fpr = 0, tpr = 0), survivalscore_line, data.frame(fpr = 1, tpr = 1)) %>% arrange(fpr, tpr) %>% distinct()
+
+surscore_auc <- sum(diff(roc_pts_sur$fpr) * (head(roc_pts_sur$tpr, -1) + tail(roc_pts_sur$tpr, -1)) / 2)
+
+paste0("Survival score AUC: ", round(surscore_auc, 2))
+
+
+## growth ROC curve
+growthscore_thresholds <- seq(-0.79,0.81,0.01)
+growthscore_roc_df <- data.frame("threshold" = growthscore_thresholds, "tpr" = NA, "fpr" = NA)
+for(x in 1:nrow(growthscore_roc_df)){
+  temp_threshold <- growthscore_roc_df$threshold[x]
+  pathog_true_pos <- nrow(subset(clinvar_vus2, log_growth_ratio <= temp_threshold & class == "pathogenic"))
+  pathog_false_neg <- nrow(subset(clinvar_vus2, log_growth_ratio > temp_threshold & class == "pathogenic"))
+  pathog_false_pos <- nrow(subset(clinvar_vus2, log_growth_ratio <= temp_threshold & class == "GnomAD"))
+  pathog_true_neg <- nrow(subset(clinvar_vus2, log_growth_ratio > temp_threshold & class == "GnomAD"))
+  growthscore_roc_df$tpr[x] <- pathog_true_pos / (pathog_true_pos + pathog_false_neg)
+  growthscore_roc_df$fpr[x] <- pathog_false_pos / (pathog_false_pos + pathog_true_neg)
+}
+
+growthscore_line <- growthscore_roc_df %>% arrange(fpr, tpr) %>% select(fpr, tpr) %>% distinct()
+
+roc_pts_growth <- bind_rows(data.frame(fpr = 0, tpr = 0), growthscore_line, data.frame(fpr = 1, tpr = 1)) %>% arrange(fpr, tpr) %>% distinct()
+
+growthscore_auc <- sum(diff(roc_pts_growth$fpr) * (head(roc_pts_growth$tpr, -1) + tail(roc_pts_growth$tpr, -1)) / 2)
+
+paste0("Growth score AUC: ", round(growthscore_auc, 2))
+
+Assay_ROC_plot <- ggplot() + theme(panel.grid.minor = element_blank()) + 
+  scale_x_continuous(limits = c(0,1.02), expand = c(0,0.01)) +
+  scale_y_continuous(limits = c(0,1.02), expand = c(0,0.01)) +
+  geom_abline(slope = 1, intercept = 0, color = "grey50", alpha = 0.4, size = 2) +
+  geom_point(data = cascore_roc_df, aes(x = fpr, y = tpr), alpha = 1, color = "cyan", size = 1) +
+  geom_line(data = cascore_line, aes(x = fpr, y = tpr), color = "cyan") +
+  geom_point(data = survivalscore_roc_df, aes(x = fpr, y = tpr), alpha = 1, color = "salmon", size = 1) +
+  geom_line(data = survivalscore_line, aes(x = fpr, y = tpr), color = "salmon") +
+  geom_point(data = growthscore_roc_df, aes(x = fpr, y = tpr), alpha = 1, color = "darkgreen", size = 1) +
+  geom_line(data = growthscore_line, aes(x = fpr, y = tpr), color = "darkgreen") +
+  labs(x = "False positive rate", y = "True positive rate") +
+  NULL; Assay_ROC_plot; ggsave(file = "Plots/Assay_ROC_plot.pdf", Assay_ROC_plot, height = 2, width = 3.5); ggsave(file = "Plots/Assay_ROC_plot.png", Assay_ROC_plot, height = 2.25, width = 2.9)
+
+#Figure 5C
+
+## Now plot the predictors
+Predictor_ROC_plot <- ggplot() + theme(panel.grid.minor = element_blank()) + 
+  scale_x_continuous(limits = c(0,1.02), expand = c(0,0.01)) +
+  scale_y_continuous(limits = c(0,1.02), expand = c(0,0.01)) +
+  geom_abline(slope = 1, intercept = 0, color = "grey50", alpha = 0.4, size = 2) +
+  geom_point(data = am2_roc_df, aes(x = fpr, y = tpr), alpha = 1, color = "darkgreen", size = 1) +
+  geom_line(data = am2_line, aes(x = fpr, y = tpr), color = "darkgreen") +
+  geom_point(data = cascore_roc_df, aes(x = fpr, y = tpr), alpha = 1, color = "cyan", size = 1) +
+  geom_line(data = cascore_line, aes(x = fpr, y = tpr), color = "cyan") +
+  geom_point(data = mutpred2_roc_df, aes(x = fpr, y = tpr), alpha = 1, color = "black", size = 1) +
+  geom_line(data = mutpred2_line, aes(x = fpr, y = tpr), color = "black") +
+  geom_point(data = envision2_roc_df, aes(x = fpr, y = tpr), alpha = 1, color = "purple", size = 1) +
+  geom_line(data = envision2_line, aes(x = fpr, y = tpr), color = "purple") +
+  geom_point(data = revel2_roc_df, aes(x = fpr, y = tpr), alpha = 1, color = "goldenrod", size = 1) +
+  geom_line(data = revel2_line, aes(x = fpr, y = tpr), color = "goldenrod") +
+  #geom_point(data = envision2_roc_df, aes(x = fpr, y = tpr), alpha = 1, color = "purple", size = 2) +
+  #geom_line(data = envision2_line, aes(x = fpr, y = tpr), color = "purple") +
+  labs(x = "False positive rate", y = "True positive rate") +#\nPurple: Envision") +
+  NULL; Predictor_ROC_plot
+ggsave(file = "Plots/Predictor_ROC_plot.pdf", Predictor_ROC_plot, height = 2, width = 3.5); ggsave(file = "Plots/Predictor_ROC_plot.png", Predictor_ROC_plot, height = 2.25, width = 2.9)
+
+
+#Figure 5D##
+
+cascore_roc_df$youden_j <- cascore_roc_df$tpr - cascore_roc_df$fpr
+
+best_row_j <- cascore_roc_df[which.max(cascore_roc_df$youden_j), ]
+
+print(paste0("Best Threshold (Youden's J): ", best_row_j$threshold))
+
+best_row <- cascore_roc_df[which.max(cascore_roc_df$youden_j), ]
+
+cat(paste0(
+  "Best Threshold: ", best_row$threshold, "\n",
+  "True Positive Rate (Sensitivity): ", round(best_row$tpr, 3), "\n",
+  "False Positive Rate (1 - Specificity): ", round(best_row$fpr, 3), "\n"))
+
+clinvar_vus3 <- rbind(clinvar_vus[,c("position","variant","ca_score","class")], all_scores_syn %>% mutate(class = "syn") %>% select(position, variant, ca_score, class), all_scores %>% filter(snv == "yes") %>% mutate(class = "snv") %>% select(position, variant, ca_score, class))
+
+# clinvar_vus3 = clinvar_vus3 %>% mutate(class = if_else(variant %in% c("E66K", "A67T", "E66A", "A67P", "D82H", "N80D", "R69H", "N80S", "D77N", "R69G", "R69C", "N97S", "N70Y", "K73R", "E86K", "D89A", "D82Y", "E90G", "E90D"), "gnomAD", "VUS"))
+
+clinvar_vus3 = clinvar_vus3 %>% mutate(class1 = case_when(class == "VUS" & variant %in% c("E66K", "A67T", "E66A", "A67P", "D82H", "N80D", "R69H", "N80S", "D77N", "R69G", "R69C", "N97S", "N70Y", "K73R", "E86K", "D89A", "D82Y", "E90G", "E90D") ~ "gnomAD",
+                                                          class == "VUS" & !variant %in% c("E66K", "A67T", "E66A", "A67P", "D82H", "N80D", "R69H", "N80S", "D77N", "R69G", "R69C", "N97S", "N70Y", "K73R", "E86K", "D89A", "D82Y", "E90G", "E90D") ~ "VUS",
+                                                          class == "path" ~ "path",
+                                                          class == "LP" ~ "LP"))
+
+clinvar_vus3$class <- factor(clinvar_vus3$class, levels = rev(c("path","LP","VUS","syn","snv")))
+
+
+clinvar_cascore_plot = ggplot() + scale_fill_manual(values = c("LP" = "orange", "path" = "red", "VUS" = "purple", "gnomAD" = "lightgreen")) +scale_x_continuous(limits = c(0.35,1))+
+  scale_color_manual(values = c("LP" = "orange", "path" = "red", "VUS" = "purple", "gnomAD" = "lightgreen")) +
+   # geom_histogram(data = clinvar_vus3 %>% filter(class == "snv"), aes(x= ca_score), fill = "grey", alpha = 0.5, bins = 15)+
+  geom_histogram(data = clinvar_vus3 %>% filter(class1 %in% c("LP", "path", "VUS", "gnomAD")), aes(x = ca_score, fill = class1, color = class1), alpha = 0.5, binwidth = 0.05) +
+  labs(x = "Calcium score", y = "Number of variants") + 
+  geom_vline(xintercept = 0.75, linetype = "dashed") + theme(legend.position = "none")+NULL; clinvar_cascore_plot; ggsave(file = "Plots/clinvar_cascore_plot.pdf", clinvar_cascore_plot, height = 1, width = 2.5); ggsave(file = "Plots/clinvar_cascore_plot.png", clinvar_cascore_plot, height = 2, width = 3)
+
+clinvar_snv_plot = ggplot() + scale_x_continuous(limits = c(0.35,1))+
+   geom_histogram(data = clinvar_vus3 %>% filter(class == "snv"), aes(x= ca_score), fill = "grey", alpha = 0.75, bins = 15)+
+  # geom_histogram(data = clinvar_vus3 %>% filter(class1 %in% c("LP", "path", "VUS", "gnomAD")), aes(x = ca_score, fill = class1, color = class1), alpha = 0.5, binwidth = 0.05) +
+  labs(x = "Calcium score", y = "Number of variants") + 
+  geom_vline(xintercept = best_row$threshold, linetype = "dashed") + theme(legend.position = "none")+NULL; clinvar_snv_plot
+ggsave(file = "Plots/clinvar_snv_plot.pdf", clinvar_snv_plot, height = 1, width = 2.5)
+
+##OddsPath scores for calcium influx scores
+
+#OddsPath1
+#benign set of variants as GnomAD variants with Allele Count > 1
+gnomad_ef1 = left_join(clinvar_vus2, gnomad_ef) %>% filter(Allele.Count > 1)
+
+benign <- clinvar_vus2 %>% filter(class == "GnomAD" & variant %in% gnomad_ef1$variant)
+
+pathogenic <- clinvar_vus2 %>% filter(class == "pathogenic")
+
+ref <- bind_rows(pathogenic %>% mutate(class1 = 1), benign %>% mutate(class1 = 0)) %>% distinct(variant, .keep_all = TRUE)
+
+#split into training and test dataset
+set.seed(96)
+train_idx <- sample(seq_len(nrow(ref)), size = floor(0.5 * nrow(ref)))
+train <- ref[train_idx, ]
+test  <- ref[-train_idx, ]
+
+#finding threshold value using ROC curve
+roc_obj <- roc(response = train$class1, predictor = train$ca_score,
+               direction = "<", quiet = TRUE) 
+best <- coords(roc_obj, "best", ret = c("threshold", "sensitivity", "specificity"),
+               best.method = "youden")
+threshold <- best$threshold
+print(best)
+
+ggroc(roc_obj, legacy.axes = TRUE, color = "#2c7bb6", linewidth = 1) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray50") +
+  labs(title = "ROC Curve", x = "False Positive Rate", y = "True Positive Rate") +
+  theme_minimal()
+
+#OddsPath1 score using threshold on training data
+abnormal <- function(x) x >= threshold  
+
+a <- sum(test$class1 == 1 & abnormal(test$ca_score), na.rm = T) 
+n_p <- sum(test$class1 == 1)
+b <- sum(test$class1 == 0 & abnormal(test$ca_score), na.rm = T)  
+n_b <- sum(test$class1 == 0)
+
+p_abn_path <- (a + 0.5) / (n_p + 1)
+p_nor_path <- (n_p - a + 0.5) / (n_p + 1)
+p_abn_ben  <- (b + 0.5) / (n_b + 1)
+p_nor_ben  <- (n_b - b + 0.5) / (n_b + 1)
+
+OP_abnormal <- p_abn_path / p_abn_ben
+OP_normal   <- p_nor_path / p_nor_ben
+
+
+clinvar_vus2 <- clinvar_vus2 %>% mutate(OddsPath = ifelse(abnormal(ca_score), OP_abnormal, OP_normal))
+
+all_scores <- all_scores %>% mutate(OddsPath = ifelse(abnormal(ca_score), OP_abnormal, OP_normal))
+
+
+#OddsPath2
+#Using synonymous variants as benign dataset
+benign1 <- all_scores %>% filter(type == "syn")
+
+ref1 <- bind_rows(pathogenic %>% mutate(class1 = 1), benign1 %>% mutate(class1 = 0)) %>% distinct(variant, .keep_all = TRUE)
+
+
+set.seed(96)
+train_idx1 <- sample(seq_len(nrow(ref1)), size = floor(0.5 * nrow(ref1)))
+train1 <- ref1[train_idx1, ]
+test1  <- ref1[-train_idx1, ]
+
+roc_obj1 <- roc(response = train1$class1, predictor = train1$ca_score,
+               direction = "<", quiet = TRUE) 
+best1 <- coords(roc_obj1, "best", ret = c("threshold", "sensitivity", "specificity"),
+               best.method = "youden")
+threshold1 <- best1$threshold
+print(best1)
+
+ggroc(roc_obj1, legacy.axes = TRUE, color = "#2c7bb6", linewidth = 1) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray50") +
+  labs(title = "ROC Curve", x = "False Positive Rate", y = "True Positive Rate") +
+  theme_minimal()
+
+abnormal1 <- function(x) x >= threshold1 
+
+a1 <- sum(test1$class1 == 1 & abnormal(test1$ca_score), na.rm = T)  
+n_p1 <- sum(test1$class1 == 1)
+b1 <- sum(test1$class1 == 0 & abnormal(test1$ca_score), na.rm = T)  
+n_b1 <- sum(test1$class1 == 0)
+
+p_abn_path1 <- (a1 + 0.5) / (n_p1 + 1)
+p_nor_path1 <- (n_p1 - a1 + 0.5) / (n_p1 + 1)
+p_abn_ben1  <- (b1 + 0.5) / (n_b1 + 1)
+p_nor_ben1  <- (n_b1 - b1 + 0.5) / (n_b1 + 1)
+
+OP_abnormal1 <- p_abn_path1 / p_abn_ben1
+OP_normal1   <- p_nor_path1 / p_nor_ben1
+
+clinvar_vus2 <- clinvar_vus2 %>%
+  mutate(OddsPath1 = ifelse(abnormal1(ca_score), OP_abnormal1, OP_normal1))
+
+all_scores <- all_scores %>%
+  mutate(OddsPath1 = ifelse(abnormal1(ca_score), OP_abnormal1, OP_normal1))
+
+
+all_scores = all_scores %>% mutate(prediction = case_when(OddsPath1 < 0.3 ~ "likely_benign",
+                                                          OddsPath1 >= 30 ~ "likely_pathogenic"))
+
+oddspath_plot = ggplot(data = all_scores, aes(x= ca_score, fill = prediction))+ 
+  geom_histogram(alpha = 0.5, color = "black", bins = 15)+ labs(x = "Calcium Influx Score", y= "Count", fill = "Odds Path Score prediction")+
+  geom_vline(xintercept = best1$threshold, linetype = "dashed", color = "black")+ theme(legend.position = "none")+NULL; oddspath_plot
+
+ggsave("plots/oddspath_plot.pdf", oddspath_plot, height = 1, width = 2.75)
+
+```
+
+```{r Figure 6A,B}
+chrm3 = read.csv("data/F424_chrm3_1.csv")
+chrm3 = chrm3 %>% mutate(sample = case_when(SampleID %in% c(1,5,12) ~ "pep+none",
+                                            SampleID %in% c(2,6,11) ~ "pep+cch",
+                                            SampleID %in% c(3,7,10) ~ "chrm3+none",
+                                            SampleID %in% c(4,8,9) ~ "chrm3+cch"),
+                         replicate = case_when(SampleID %in% c(1:4) ~ "R1",
+                                               SampleID %in% c(5:8) ~ "R2",
+                                               SampleID %in% c(9:12) ~ "R3"))
+
+chrm3 = chrm3 %>% filter(FSC.A > 75000 & FSC.A < 175000 & SSC.A < 100000)
+
+#Figure 6A
+chrm3_1 = chrm3 %>% separate_wider_delim(cols = sample, delim = "+", names = c("variant", "condition"))
+chrm3_1$variant = factor(chrm3_1$variant, c("pep", "chrm3"))
+chrm3_1$condition = factor(chrm3_1$condition, c("none", "cch"))
+
+chrm3_1 = chrm3_1 %>% group_by(variant, condition) %>% mutate(mean_ratio = mean(G575.A.B515.A))
+
+
+
+chrm3_histogram2 = ggplot()+ scale_x_log10(limits = c(0.003, 3))+ labs(x= NULL, y= NULL)+
+  geom_histogram(data = chrm3_1 %>% filter(variant == "pep"), aes(x= G575.A.B515.A), fill = "white", color = "black")+
+  geom_histogram(data = chrm3_1 %>% filter(variant == "chrm3"), aes(x = G575.A.B515.A), fill = "black", alpha = 0.5) +
+  facet_grid(rows = vars(condition))+NULL; chrm3_histogram2
+
+ggsave("plots/chrm3_histogram2.pdf", chrm3_histogram2, height = 1.5, width = 2)
+
+#Figure 6B
+
+chrm3_rep = chrm3 %>% group_by(sample, replicate) %>% mutate(green_mfi = mean(B515.A, na.rm = T),
+                                                             red_mfi = mean(G575.A, na.rm = T),
+                                                             derived_mfi = mean(G575.A.B515.A, na.rm = T),
+                                                             ratio = red_mfi/green_mfi) %>% distinct(sample, replicate, green_mfi, red_mfi, ratio)
+
+chrm3_rep = chrm3_rep %>% group_by(sample) %>% mutate(avg_ratio = 10^mean(log10(ratio), na.rm = T))
+
+chrm3_rep$sample = factor(chrm3_rep$sample, c("pep+none", "chrm3+none", "pep+cch", "chrm3+cch"))
+
+chrm3_plot = ggplot(data = chrm3_rep, aes(x= sample, y= ratio))+ labs(x= NULL, y= "CaMPARI2 ratio")+ scale_y_log10(limits = c(0.03, 0.3))+
+  geom_quasirandom(alpha = 0.5) + theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))+
+  geom_point(data = chrm3_rep, aes(x= sample, y= avg_ratio), shape = 45, size = 5, color = "red")+NULL; chrm3_plot
+
+ggsave("plots/chrm3_plot.pdf", chrm3_plot, height = 2, width = 2.25)
+
+
+
+```
+
+```{r Figure 6C-E}
+casrvar_pr = read.csv("data/casrvar_pr.csv") %>% filter(!variant %in% c("S657C (gof)")) #there's a unintended mutation in the construct
+casrvar_pr$condition = factor(casrvar_pr$condition, c("0mM", "2mM", "5mM", "10mM", "20mM", "50mM"))
+casrvar_pr$ratio = as.numeric(casrvar_pr$ratio)
+casrvar_pr$ratio_abs = as.numeric(casrvar_pr$ratio_abs)
+casrvar = casrvar_pr %>% filter(experiment == "casrvar")
+casrvar$variant = factor(casrvar$variant, c("pep", "WT", "Q27E (gof)", "Q27P (lof)", "S657Y (lof)"))
+casrvar$rep = as.character(casrvar$rep)
+casrvar_pr$rep = as.character(casrvar_pr$rep)
+
+casrvar = casrvar %>% filter(rep != "4") %>% group_by(variant, condition) %>% mutate(geo_ratio = 10^mean(log10(ratio)),
+                                                              geo_ratio_abs = 10^mean(log10(ratio_abs)))
+
+
+ggplot(data = casrvar, aes(x= ratio, fill = variant))+
+  geom_histogram()+
+  facet_grid(rows = vars(rep))
+
+rep_medians_casrvar <- casrvar %>% group_by(rep) %>% summarize(med_ratio = median(ratio, na.rm = T))
+med_casrvar_ratio <- median(rep_medians_casrvar$med_ratio)
+
+casrvar_rep1 <- casrvar %>% filter(rep == 1) %>% mutate(scaled_ratio = ratio / rep_medians_casrvar$med_ratio[1] * med_casrvar_ratio)
+casrvar_rep2 <- casrvar %>% filter(rep == 2) %>% mutate(scaled_ratio = ratio / rep_medians_casrvar$med_ratio[2] * med_casrvar_ratio)
+casrvar_rep3 <- casrvar %>% filter(rep == 3) %>% mutate(scaled_ratio = ratio / rep_medians_casrvar$med_ratio[3] * med_casrvar_ratio)
+casrvar_rep5 <- casrvar %>% filter(rep == 5) %>% mutate(scaled_ratio = ratio / rep_medians_casrvar$med_ratio[4] * med_casrvar_ratio)
+
+
+casrvar_scaled <- rbind(casrvar_rep1, casrvar_rep2, casrvar_rep3, casrvar_rep5) %>% group_by(variant, condition) %>% mutate(gmean_scaled_ratio = 10^mean(log10(scaled_ratio), na.rm = T), median_scaled = median(scaled_ratio, na.rm = T))
+
+ggplot(data = casrvar_scaled, aes(x= scaled_ratio, fill = variant))+
+  geom_histogram()+
+  facet_grid(rows = vars(rep))
+
+#Figure 6C
+casr_pep_wt = ggplot() + 
+  scale_y_log10() + 
+  geom_point(data = casrvar_scaled %>% filter(variant %in% c("pep", "WT")), 
+             aes(x = condition, y = median_scaled, color = variant), 
+             shape = 5) +   
+  # scale_color_manual(values = c("pep" = "#F8766D", "WT" = " "))+
+  geom_line(data = casrvar_scaled %>% filter(variant %in% c("pep", "WT")), aes(x = condition, y = median_scaled, color = variant, group = variant)) + 
+  theme(legend.position = "none") + labs(x= "Media [Ca2+]", y= "Scaled CaMPARI2 ratio")+NULL; casr_pep_wt
+
+
+#Figure 6D
+
+casrvar_scaled_all1 = ggplot() + labs(x = NULL, y = "Scaled CaMPARI2 ratio")+ scale_y_log10(limits = c(0.003, 0.1), breaks = c(0.003,0.01, 0.03, 0.1))+
+  geom_quasirandom( data = casrvar_scaled, aes(x = condition, y = scaled_ratio, color = variant, group = variant), alpha = 0.35, varwidth = 0.5, dodge.width = 0.8, size = 1) + 
+  geom_point(data = casrvar_scaled, aes(x = condition, y = gmean_scaled_ratio, color = variant, group = variant), shape = 45, size = 3, position = position_dodge(width = 0.8)) + theme(legend.position = "bottom", text = element_text(size = 6))+NULL; casrvar_scaled_all1
+
+ggsave("plots/casrvar_scaled_all.pdf", casrvar_scaled_all1, height = 1.5, width = 3.25)
+
+
+casrvar_flow = read.csv("data/casrvar_flow.csv")
+
+casrvar_flow = casrvar_flow %>% mutate(variant = case_when(SampleID %in% c(1,2,11,12) ~ "pep",
+                                                           SampleID %in% c(3,4,13,14) ~ "WT",
+                                                           SampleID %in% c(5,6,15,16) ~ "Q27E (gof)",
+                                                           SampleID %in% c(7,8,17,18) ~ "Q27P (lof)",
+                                                           SampleID %in% c(9,10,19,20) ~ "S657Y (lof)"))
+
+casrvar_flow = casrvar_flow %>% mutate(rep = case_when(SampleID %in% c(1:10) ~ "R1",
+                                                       SampleID %in% c(11:20) ~ "R2"),
+                                     condition = case_when(SampleID %in% c(1,3,5,7,9,11,13,15,17,19) ~ "2mM",
+                                                         SampleID %in% c(2,4,6,8,10,12,14,16,18,20) ~ "10mM"))
+
+casrvar_flow = casrvar_flow %>% filter(FSC.A > 75000 & FSC.A < 175000 & SSC.A < 100000)
+
+casrvar_flow$variant = factor(casrvar_flow$variant, c("pep", "WT", "Q27E (gof)", "Q27P (lof)", "S657Y (lof)"))
+
+ggplot(data = casrvar_flow %>% filter(condition == "2mM"), aes(x = G575.A.B515.A))+
+  geom_histogram(alpha = 0.5)+ scale_x_log10(limits = c(0.003,3))+
+  facet_grid(rows = vars(variant))
+
+ggplot(data = casrvar_flow %>% filter(condition == "10mM"), aes(x = G575.A.B515.A))+
+  geom_histogram(alpha = 0.5)+ scale_x_log10(limits = c(0.003,3))+
+  facet_grid(rows = vars(variant))
+
+#Figure 6E
+
+casrvar_histogram = ggplot()+ theme(text = element_text(size = 10))+ scale_y_continuous()+
+  geom_histogram(data = casrvar_flow %>% filter(condition == "2mM"), aes(x = G575.A.B515.A), color = "black", fill = "white")+ labs(x= NULL, y= NULL)+
+  geom_histogram(data = casrvar_flow %>% filter(condition == "10mM"), aes(x = G575.A.B515.A), alpha = 0.75)+ scale_x_log10(limits = c(0.003,3))+
+  facet_grid(rows = vars(variant))+NULL; casrvar_histogram
+
+ggsave("plots/casrvar_histogram.pdf", casrvar_histogram, height = 2.5, width = 2)
+
+```
+
+
+
+##Appendix - Do not run unless necessary
+#raw data for Fig2 - targeted bulk assays - Supplement Fig 1
+```{r CaMPARI2 targeted, eval=FALSE, include=FALSE}
+ecr1_edit = read.csv("data/bulk_assay_data/CaMPARI2/r1.csv") %>% mutate(replicate = "1")
+ecr1_edit = ecr1_edit %>% select(variant, replicate, Live.Singlets.Q5..V450.A....B515.A..B515.A.subset...Geometric.Mean..B515.A., Live.Singlets.Q5..V450.A....B515.A..G575.A.subset...Geometric.Mean..G575.A.) %>% rename_with(~c("variant", "replicate", "gmean_green", "gmean_red"))
+ecr1_edit = ecr1_edit %>% mutate(ratio = gmean_red / gmean_green) %>% group_by(variant, replicate) %>% mutate(repgmean_green = 10^mean(log10(gmean_green)), repgmean_red = 10^mean(log10(gmean_red)), repgmean_ratio = 10^mean(log10(ratio)))
+ggplot() + scale_x_log10() + geom_histogram(data = ecr1_edit, aes(x = repgmean_green, fill = variant), bins = 20)
+ggplot() + scale_x_log10() + geom_histogram(data = ecr1_edit, aes(x = repgmean_red, fill = variant), bins = 20) 
+ggplot() + scale_x_log10() + geom_histogram(data = ecr1_edit, aes(x = repgmean_ratio, fill = variant), bins = 20) 
+
+ecr2 = read.csv("data/bulk_assay_data/CaMPARI2/r2.csv") %>% mutate(replicate = "2")
+ecr3 = read.csv("data/bulk_assay_data/CaMPARI2/r3.csv") %>% mutate(replicate = "3")
+ecr4 = read.csv("data/bulk_assay_data/CaMPARI2/r4.csv") %>% mutate(replicate = "4")
+
+ecr = bind_rows(ecr2, ecr3, ecr4) %>% select(variant, replicate,Live.Singlets.Q4..V450.A....R670.A..B515.A....Freq..of.Parent...., Live.Singlets.Q4..V450.A....R670.A..G575.A....Freq..of.Parent...., Live.Singlets.Q5..V450.A....B515.A....Geometric.Mean..B515.A., Live.Singlets.Q5..V450.A....B515.A....Geometric.Mean..G575.A.) %>% rename_with(~c("variant", "replicate", "pct_green", "pct_red", "gmean_green", "gmean_red")) %>% mutate(ratio = gmean_red / gmean_green)
+
+ecr = ecr %>% group_by(variant, replicate) %>% mutate(repgmean_red = 10^mean(log10(gmean_red)),
+                                                      repgmean_green = 10^mean(log10(gmean_green)),
+                                                      repgmean_ratio = 10^mean(log10(ratio)))
+ecr = bind_rows(ecr, ecr1_edit)
+
+ggplot() + scale_x_log10() + geom_histogram(data = ecr, aes(x = gmean_green, fill = variant), bins = 20) + facet_grid(rows = vars(replicate))
+ggplot() + scale_x_log10() + geom_histogram(data = ecr, aes(x = gmean_red, fill = variant), bins = 20) +
+  facet_grid(rows = vars(replicate))
+ggplot() + scale_x_log10() + geom_histogram(data = ecr, aes(x = ratio, fill = variant), bins = 20) +
+  facet_grid(rows = vars(replicate))
+
+ecr_varmean = ecr %>% group_by(variant) %>% summarize(mean_ratio = 10^mean(log10(repgmean_ratio)), sd_ratio = 10^sd(log10(repgmean_ratio))) %>% mutate(cv = sd_ratio / mean_ratio) 
+ecr = ecr %>% group_by(variant) %>% mutate(median_ratio = median(repgmean_ratio))
+ecr$variant = factor(ecr$variant, c("vif","WT", "R429C", "R304W", "E66K", "A67T", "R69C", "R69H", "N80S", "E90D", "K73R", "D76G","G81C", "D84N",  "F91Y", "H72Q", "G81D", "D84E", "L92V", "L96V", "L74P", "D84G"))
+
+campari_raw_plot = ggplot(data = ecr %>% distinct(variant, ratio, replicate), aes(x= variant, y= ratio, color = replicate))+
+  geom_quasirandom(alpha = 0.5, size = 1) + scale_y_log10(limits = c(0.01, 10))+
+  labs(x= "Variant", y= "CaMPARI2 \nred:green ratio")+
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1), legend.position = "none") +
+  geom_point(data = ecr_varmean, aes(x= variant, y= mean_ratio), color = "black", shape = 45, size = 3)+
+  geom_hline(yintercept = 0.3578594, linetype = "dotted", alpha = 0.5)+NULL; campari_raw_plot
+
+all_campari = ggplot(data = ecr %>% distinct(variant, repgmean_ratio), aes(x= variant, y= repgmean_ratio))+
+  geom_quasirandom(alpha = 0.5) + scale_y_log10(limits = c(0.01, 10))+
+  labs(x= "Variant", y= "CaMPARI2 \nred:green ratio")+
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1), legend.position = "none") +
+  geom_point(data = ecr_varmean, aes(x= variant, y= mean_ratio), color = "red", shape = 45, size = 5)+
+  geom_hline(yintercept = 0.3578594, linetype = "dotted", alpha = 0.5)+NULL; all_campari
+ggsave("plots/fig2_rawdata/all_campari.pdf", all_campari, height = 1.5, width = 6)
+
+# ecr_save = ecr %>% select(variant, replicate, repgmean_ratio, median_ratio) %>% distinct(variant, replicate, repgmean_ratio, median_ratio)
+# write.csv(ecr_save, "data/campari_raw.csv")
+```
+
+```{r abundance, eval=FALSE, include=FALSE}
+abr1 = read.csv("data/bulk_assay_data/abundance/r1.csv") %>% mutate(replicate = "1")
+abr2 = read.csv("data/bulk_assay_data/abundance/r2.csv") %>% mutate(replicate = "2")
+abr3 = read.csv("data/bulk_assay_data/abundance/r3.csv") %>% mutate(replicate = "3")
+abr4 = read.csv("data/bulk_assay_data/abundance/r4.csv") %>% mutate(replicate = "4")
+abr5 = read.csv("data/bulk_assay_data/abundance/r5.csv") %>% mutate(replicate = "5")
+
+ab = bind_rows(abr1, abr2, abr3, abr4, abr5); ab = ab[-1]; ab = ab[-8]
+colnames(ab)
+colnames(ab) = c("pct_live", "pct_mcherry", "gmean_green", "median_green", "mode_green", "variant", "replicate")
+ab$variant = factor(ab$variant, c("vif","vif + TG","WT","WT + TG","R429C", "R304W","E66K", "A67T", "R69C", "R69H", "N80S", "E90D", "K73R", "D76G","G81C", "D84N",  "F91Y", "H72Q", "G81D", "D84E", "L92V", "L96V", "L74P", "D84G"))
+
+ab = ab %>% filter(!(variant %in% c("vif","vif + TG"))) %>% group_by(variant) %>% mutate(var_gmean = 10^mean(log10(gmean_green)),
+                                              var_median = 10^mean(log10(median_green)),
+                                              var_mode = 10^mean(log10(mode_green)))
+
+## Scaled
+ab_rep_medians <- ab %>% filter(variant != "vif") %>% group_by(replicate) %>% summarize(med_gmean = median(gmean_green, na.rm = T),
+                                                        med_median = median(median_green, na.rm = T))
+ab_med_gmean <- median(ab_rep_medians$med_gmean)
+
+ab_rep1 <- ab %>% filter(replicate == 1) %>% mutate(scaled_gmean_green = gmean_green / ab_rep_medians$med_gmean[1] * ab_med_gmean)
+ab_rep2 <- ab %>% filter(replicate == 2) %>% mutate(scaled_gmean_green = gmean_green / ab_rep_medians$med_gmean[2] * ab_med_gmean)
+ab_rep3 <- ab %>% filter(replicate == 3) %>% mutate(scaled_gmean_green = gmean_green / ab_rep_medians$med_gmean[3] * ab_med_gmean)
+ab_rep4 <- ab %>% filter(replicate == 4) %>% mutate(scaled_gmean_green = gmean_green / ab_rep_medians$med_gmean[4] * ab_med_gmean)
+ab_rep5 <- ab %>% filter(replicate == 5) %>% mutate(scaled_gmean_green = gmean_green / ab_rep_medians$med_gmean[5] * ab_med_gmean)
+
+ab <- rbind(ab_rep1, ab_rep2, ab_rep3, ab_rep4, ab_rep5) %>% group_by(variant) %>% mutate(gmean_scaled_gmean = 10^mean(log10(scaled_gmean_green), na.rm = T), median_scaled = median(scaled_gmean_green, na.rm = T))
+
+ab_scaled_histogram <- ggplot() + scale_x_log10() + 
+  geom_histogram(data = ab %>% filter(variant != "vif"), aes(x= scaled_gmean_green, fill = variant)) +
+  NULL; ab_scaled_histogram
+
+ab_scaled_plot = ggplot()+
+  geom_quasirandom(data = ab, aes(x= variant, y= scaled_gmean_green, color = replicate), alpha = 0.5, size = 1) + 
+  scale_y_log10()+
+  geom_point(data = ab, aes(x= variant, y= median_scaled), color = "black", shape = 45, size = 3) +
+  labs(x= "Variant", y= "mGreenLantern \nMFI")+ 
+  geom_hline(yintercept = 29026.34, alpha = 0.5, linetype = "dotted")+
+  # facet_grid(rows = vars(replicate)) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1), legend.position = "none")+NULL; ab_scaled_plot
+
+ab_plot = ggplot()+
+  geom_quasirandom(data = ab, aes(x= variant, y= scaled_gmean_green), alpha = 0.5) + 
+  scale_y_log10(limits = c(10000, 100000))+
+  geom_point(data = ab, aes(x= variant, y= median_scaled), color = "red", shape = 95, size = 5)+
+  labs(x= NULL, y= "mGreenLantern \nMFI")+ 
+  geom_hline(yintercept = 29026.34, alpha = 0.5, linetype = "dotted")+
+  # facet_grid(rows = vars(replicate)) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1), legend.position = "none")+NULL; ab_plot
+
+ggsave("plots/fig2_rawdata/ab_plot.pdf", ab_plot, height = 1.5, width = 6)
+
+# ab_save = ab %>% select(variant, replicate, gmean_scaled_gmean, median_scaled) %>% distinct()
+# write.csv(ab_save, "data/abundance_raw.csv")
+```
+
+```{r puncta_formation, eval=FALSE, include=FALSE}
+nk_r1 = read.csv("data/bulk_assay_data/puncta_formation/nk_r1.csv")
+nk_r2 = read.csv("data/bulk_assay_data/puncta_formation/nk_r2.csv")
+nk_r3 = read.csv("data/bulk_assay_data/puncta_formation/nk_r3.csv")
+kam_r1 = read.csv("data/bulk_assay_data/puncta_formation/kam_r1.csv")
+kam_r2 = read.csv("data/bulk_assay_data/puncta_formation/kam_r2.csv")
+oms_r1 = read.csv("data/bulk_assay_data/puncta_formation/oms_r1.csv")
+
+#keys for deidentifying
+filename_r1 = read.csv("data/bulk_assay_data/puncta_formation/filenames_r1.csv")
+filename_r2 = read.csv("data/bulk_assay_data/puncta_formation/filenames_r2.csv")
+filename_r3 = read.csv("data/bulk_assay_data/puncta_formation/filenames_r3.csv")
+
+nk_r1 = left_join(nk_r1, filename_r1) %>% mutate(replicate = "1", user = "nk") 
+nk_r2 = left_join(nk_r2, filename_r2) %>% mutate(replicate = "2", user = "nk") 
+nk_r3 = left_join(nk_r3, filename_r3) %>% mutate(replicate = "3", user = "nk") 
+kam_r1 = left_join(kam_r1, filename_r1) %>% mutate(replicate = "1", user = "kam") 
+kam_r2 = left_join(kam_r2, filename_r2) %>% mutate(replicate = "2", user = "kam") 
+oms_r1 = left_join(oms_r1, filename_r1) %>% mutate(replicate = "1", user = "oms") 
+
+nk_r1$pct_puncta = as.numeric(nk_r1$pct_puncta)
+nk_r1$total_cells = as.numeric(nk_r1$total_cells)
+nk_r2$pct_puncta = as.numeric(nk_r2$pct_puncta)
+nk_r2$pct_puncta = as.numeric(nk_r2$total_cells)
+nk_r3$pct_puncta = as.numeric(nk_r3$pct_puncta)
+nk_r3$total_cells = as.numeric(nk_r3$total_cells)
+
+kam_r1$pct_puncta = as.numeric(kam_r1$pct_puncta)
+kam_r1$total_cells = as.numeric(kam_r1$total_cells)
+kam_r2$pct_puncta = as.numeric(kam_r2$pct_puncta)
+kam_r2$total_cells = as.numeric(kam_r2$total_cells)
+
+oms_r1$pct_puncta = as.numeric(oms_r1$pct_puncta)
+oms_r1$total_cells = as.numeric(oms_r1$total_cells)
+
+
+
+agg_all = bind_rows(nk_r1, nk_r3, kam_r1, kam_r2, oms_r1)
+agg_all$variant = factor(agg_all$variant, c("WT","WT+tg", "R429C", "R304W", "E66K", "A67T", "R69C", "R69H", "N80S", "E90D", "K73R", "D76G","G81C", "D84N",  "F91Y", "H72Q", "G81D", "D84E", "L92V", "L96V", "L74P", "D84G"))
+
+agg_all$user_rep <- paste0(agg_all$user,"_",agg_all$rep)
+
+agg_all = agg_all %>% filter(new_pct_puncta != 0) %>% group_by(replicate, variant) %>% mutate(avg_puncta = 10^mean(log10(new_pct_puncta), na.rm = T))
+agg_all1 = agg_all %>% select(variant, replicate, avg_puncta) %>% distinct()
+agg_all1 = agg_all1 %>% group_by(variant) %>% mutate(median = median(avg_puncta))
+
+ggplot()+
+  geom_quasirandom(data = agg_all1, aes(x= variant, y= avg_puncta, color = replicate), alpha = 0.5)+
+  geom_point(data = agg_all1, aes(x= variant, y= median), shape = 95, color = "red")+ scale_y_log10()
+
+agg_rep_medians <- agg_all1 %>% group_by(replicate) %>% summarize(med_gmean = median(avg_puncta, na.rm = T))
+agg_med_gmean = median(agg_all1$median)
+agg_rep1 <- agg_all1 %>% filter(replicate == 1) %>% mutate(scaled_gmean_green = avg_puncta / agg_rep_medians$med_gmean[1] * agg_med_gmean)
+agg_rep2 <- agg_all1 %>% filter(replicate == 2) %>% mutate(scaled_gmean_green = avg_puncta / agg_rep_medians$med_gmean[2] * agg_med_gmean)
+agg_rep3 <- agg_all1 %>% filter(replicate == 3) %>% mutate(scaled_gmean_green = avg_puncta / agg_rep_medians$med_gmean[3] * agg_med_gmean)
+
+aggregation <- rbind(agg_rep1, agg_rep2, agg_rep3) 
+aggregation = aggregation %>% group_by(variant, replicate) %>% mutate(gmean_scaled_rep = 10^mean(log10(scaled_gmean_green), na.rm = T))
+
+aggregation = aggregation %>% group_by(variant) %>% mutate(gmean_scaled_gmean = 10^mean(log10(gmean_scaled_rep), na.rm = T), scaled_median = median(gmean_scaled_rep, na.rm = T))
+
+aggregation$variant = factor(aggregation$variant, c("neg_cntrl","WT","WT+tg", "R429C", "R304W", "E66K", "A67T", "R69C", "R69H", "N80S", "E90D", "K73R", "D76G","G81C", "D84N",  "F91Y", "H72Q", "G81D", "D84E", "L92V", "L96V", "L74P", "D84G"))
+
+agg_plot = ggplot()+
+  geom_quasirandom(data = aggregation %>% distinct(variant, gmean_scaled_rep, replicate), aes(x= variant, y= gmean_scaled_rep), alpha = 0.5) +
+  scale_y_log10(limits = c(0.001, 1))+
+  geom_point(data = aggregation, aes(x= variant, y= scaled_median), color = "red", shape = 95, size = 5) +
+  labs(x= "Variant", y= "Aggregation")+
+  geom_hline(yintercept = 0.05462179, linetype = "dotted", alpha = 0.5)+
+  # facet_grid(rows = vars(replicate)) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1), legend.position = "none")+NULL; agg_plot
+
+ggsave("plots/fig2_rawdata/agg_plot.pdf", agg_plot, height = 1.5, width = 6)
+
+# agg_save = aggregation %>% select(variant, replicate, gmean_scaled_gmean, scaled_median) %>% distinct()
+# write.csv(agg_save, "data/aggregation/aggregation_raw.csv")
+
+```
+
+```{r qPCR - actin, eval=FALSE, include=FALSE}
+plasmid_key = read.csv("data/bulk_assay_data/qPCR/plasmid_key.csv")
+actin_run1_p1 = read.csv("data/bulk_assay_data/qPCR/actin_run1/actin_p1.csv")
+actin_run1_p1 = left_join(actin_run1_p1, plasmid_key)
+
+actin_run1_p2 = read.csv("data/bulk_assay_data/qPCR/actin_run1/actin_p2.csv")
+actin_run1_p2 = left_join(actin_run1_p2, plasmid_key)
+
+actin_run1 = bind_rows(actin_run1_p1, actin_run1_p2)
+
+actin_run1 = actin_run1 %>% group_by(variant, replicate) %>% mutate(mean_actin = 10^(mean(log10(Cq), na.rm = T)))
+actin_run1_1 = actin_run1 %>% select(variant, mean_actin, replicate)
+actin_run1_1$replicate = as.integer(actin_run1_1$replicate)
+actin_run1_1 = actin_run1_1 %>% distinct(variant, replicate, mean_actin)
+
+actin_run1_1 = actin_run1_1 %>% mutate(remove = case_when(variant == "G81D" & replicate == "3" ~ "yes",
+                                                  variant == "N80S" & replicate == "3" ~ "yes",
+                                                  variant != "G81D" & variant != "N80S" | replicate != "3" ~ "no"))
+actin_run1_1 = actin_run1_1 %>% filter(remove == "no")
+actin_run1_1 = actin_run1_1 %>% select(variant, replicate, mean_actin)
+
+#G81D and N80S have really high actin values, so removing them from the dataset
+
+actin_run2 = read.csv("data/bulk_assay_data/qPCR/actin_run2/actin_run2_cq.csv")
+actin_run2 = left_join(actin_run2, plasmid_key)
+actin_run2 = actin_run2 %>% group_by(variant, replicate) %>% mutate(mean_actin = 10^(mean(log10(Cq), na.rm = T)))
+actin_run2_1 = actin_run2 %>% select(variant, mean_actin, replicate)
+actin_run2_1$replicate = as.integer(actin_run2_1$replicate)
+actin_run2_1 = actin_run2_1 %>% distinct(variant, replicate, mean_actin)
+
+actin = bind_rows(actin_run1_1, actin_run2_1)
+```
+
+```{r qPCR - bip, eval=FALSE, include=FALSE}
+bip_1 = read.csv("data/bulk_assay_data/qPCR/bip_run1/bip_p1.csv") %>% filter(Target == "bip")
+bip_1 = left_join(bip_1, plasmid_key)
+
+bip_2 = read.csv("data/bulk_assay_data/qPCR/bip_run1/bip_p2.csv") %>% filter(Target == "bip" & remove == "no")
+bip_2 = left_join(bip_2, plasmid_key)
+
+bip_3 = read.csv("data/bulk_assay_data/qPCR/bip_run2/bip_cq.csv") %>% filter(Target == "bip")
+bip_3 = left_join(bip_3, plasmid_key)
+
+bip_new = bind_rows(bip_1, bip_2, bip_3)
+
+bip_new1 = bip_new %>% group_by(variant, replicate) %>% mutate(mean_bip = 10^mean(log10(Cq), na.rm = T)) %>% select(variant, replicate, mean_bip) %>% distinct(variant, replicate, mean_bip)
+bip_new1 = left_join(bip_new1, actin)
+bip_new1 = bip_new1 %>% mutate(cq_diff = abs((mean_bip - mean_actin)))
+bip_new1 = bip_new1 %>% mutate(delta_cq = 2^-cq_diff)
+bip_new1$variant[bip_new1$variant == "vif"] = "neg_cntrl"
+
+
+
+bip_new1$variant = factor(bip_new1$variant, c("neg_cntrl","WT","R429C", "R304W", "E66K", "A67T", "R69C", "R69H", "N80S", "E90D", "K73R", "D76G","G81C", "D84N",  "F91Y", "H72Q", "G81D", "D84E", "L92V", "L96V", "L74P", "D84G"))
+bip_new1$replicate = as.character(bip_new1$replicate)
+
+bip_new1 = bip_new1 %>% group_by(variant) %>% mutate(mean_deltacq = 10^mean(log10(delta_cq), na.rm = T), median_deltacq = median(delta_cq, na.rm = T))
+
+
+
+bip_raw_histogram <- ggplot() + scale_x_log10() + 
+  geom_histogram(data = bip_new1, aes(x= cq_diff, fill = replicate)) +
+  NULL; bip_raw_histogram
+
+bip_raw_plot = ggplot(data = bip_new1, aes(x= variant, y= delta_cq, color = replicate))+
+  geom_quasirandom(alpha = 0.5, size = 1) + scale_y_log10()+
+  geom_point(data = bip_new1, aes(x= variant, y= median_deltacq), color = "black", shape = 45, size = 3) +
+  labs(x= "Variant", y= "BiP ΔCq")+
+  # facet_grid(rows = vars(replicate)) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1), legend.position = "none")+NULL; bip_raw_plot
+
+## Scaled
+rep_medians <- bip_new1 %>% group_by(replicate) %>% summarize(med_ddcq = median(delta_cq, na.rm = T))
+med_ddcq <- median(rep_medians$med_ddcq)
+
+bip_new1_rep1 <- bip_new1 %>% filter(replicate == 1) %>% mutate(scaled_delta_cq = delta_cq / rep_medians$med_ddcq[1] * med_ddcq)
+bip_new1_rep2 <- bip_new1 %>% filter(replicate == 2) %>% mutate(scaled_delta_cq = delta_cq / rep_medians$med_ddcq[2] * med_ddcq)
+bip_new1_rep3 <- bip_new1 %>% filter(replicate == 3) %>% mutate(scaled_delta_cq = delta_cq / rep_medians$med_ddcq[3] * med_ddcq)
+bip_new1_rep4 <- bip_new1 %>% filter(replicate == 4) %>% mutate(scaled_delta_cq = delta_cq / rep_medians$med_ddcq[4] * med_ddcq)
+bip_new1_rep5 <- bip_new1 %>% filter(replicate == 5) %>% mutate(scaled_delta_cq = delta_cq / rep_medians$med_ddcq[5] * med_ddcq)
+
+bip_new1 <- rbind(bip_new1_rep1, bip_new1_rep2, bip_new1_rep3, bip_new1_rep4, bip_new1_rep5) %>% group_by(variant) %>% mutate(gmean_scaled_delta_cq = 10^mean(log10(scaled_delta_cq), na.rm = T), median_scaled = median(scaled_delta_cq, na.rm = T))
+
+bip_all = ggplot()+
+  geom_quasirandom(data = bip_new1, aes(x= variant, y= scaled_delta_cq), alpha = 0.5) + 
+  scale_y_log10(limits = c(0.01, 0.3))+
+  geom_point(data = bip_new1, aes(x= variant, y= median_scaled), color = "red", shape = 95, size = 5) +
+  labs(x= NULL, y= "BiP ΔCq")+ 
+  geom_hline(yintercept = 0.05894481, alpha = 0.5, linetype = "dotted")+
+  # facet_grid(rows = vars(replicate)) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1), legend.position = "none")+NULL; bip_all
+ggsave("plots/fig2_rawdata/bip_all.pdf", bip_all, height = 1.5, width = 6)
+
+# bip_save = bip_new1 %>% select(variant, replicate, gmean_scaled_delta_cq, median_scaled)
+# write.csv(bip_save, "data/bip_raw.csv")
+
+
+```
+
+```{r qPCR - chop, eval=FALSE, include=FALSE}
+chop_1 = read.csv("data/bulk_assay_data/qPCR/chop_run1/chop_p1.csv") %>% filter(Target == "chop")
+chop_1 = left_join(chop_1, plasmid_key)
+
+chop_2 = read.csv("data/bulk_assay_data/qPCR/chop_run1/chop_p2.csv") %>% filter(Target == "chop")
+chop_2 = left_join(chop_2, plasmid_key)
+
+chop_3 = read.csv("data/bulk_assay_data/qPCR/chop_run2/chop_cq.csv") %>% filter(Target == "chop")
+chop_3 = left_join(chop_3, plasmid_key)
+
+chop_new = bind_rows(chop_1, chop_2, chop_3)
+
+chop_new1 = chop_new %>% group_by(variant, replicate) %>% mutate(mean_chop = 10^mean(log10(Cq), na.rm = T)) %>% select(variant, replicate, mean_chop) %>% distinct(variant, replicate, mean_chop)
+chop_new1 = left_join(chop_new1, actin)
+chop_new1 = chop_new1 %>% mutate(cq_diff = (mean_chop - mean_actin))
+chop_new1 = chop_new1 %>% mutate(delta_cq = 2^-cq_diff)
+
+
+chop_new1[chop_new1 == "vif"] = "neg_cntrl"
+
+chop_new1$variant = factor(chop_new1$variant, c("neg_cntrl","WT","R429C", "R304W", "E66K", "A67T", "R69C", "R69H", "N80S", "E90D", "K73R", "D76G","G81C", "D84N",  "F91Y", "H72Q", "G81D", "D84E", "L92V", "L96V", "L74P", "D84G"))
+chop_new1$replicate = as.character(chop_new1$replicate)
+
+chop_new1 = chop_new1 %>% group_by(variant) %>% mutate(mean_deltacq = 10^mean(log10(delta_cq), na.rm = T))
+
+## Scaled
+rep_medians <- chop_new1 %>% group_by(replicate) %>% summarize(med_ddcq = median(delta_cq, na.rm = T))
+med_ddcq <- median(rep_medians$med_ddcq)
+
+chop_new1_rep1 <- chop_new1 %>% filter(replicate == 1) %>% mutate(scaled_delta_cq = delta_cq / rep_medians$med_ddcq[1] * med_ddcq)
+chop_new1_rep2 <- chop_new1 %>% filter(replicate == 2) %>% mutate(scaled_delta_cq = delta_cq / rep_medians$med_ddcq[2] * med_ddcq)
+chop_new1_rep3 <- chop_new1 %>% filter(replicate == 3) %>% mutate(scaled_delta_cq = delta_cq / rep_medians$med_ddcq[3] * med_ddcq)
+chop_new1_rep4 <- chop_new1 %>% filter(replicate == 4) %>% mutate(scaled_delta_cq = delta_cq / rep_medians$med_ddcq[4] * med_ddcq)
+chop_new1_rep5 <- chop_new1 %>% filter(replicate == 5) %>% mutate(scaled_delta_cq = delta_cq / rep_medians$med_ddcq[5] * med_ddcq)
+
+chop_new1 <- rbind(chop_new1_rep1, chop_new1_rep2, chop_new1_rep3, chop_new1_rep4, chop_new1_rep5) %>% group_by(variant) %>% mutate(gmean_scaled_delta_cq = 10^mean(log10(scaled_delta_cq), na.rm = T), median_scaled = median(scaled_delta_cq, na.rm = T))
+
+
+chop_scaled_histogram <- ggplot() + scale_x_log10() + 
+  geom_histogram(data = chop_new1, aes(x= scaled_delta_cq, fill = variant)) +
+  NULL; chop_scaled_histogram
+
+chop_all = ggplot()+
+  geom_quasirandom(data = chop_new1, aes(x= variant, y= scaled_delta_cq), alpha = 0.5) + 
+  scale_y_log10(limits = c(0.01, 1))+
+  geom_point(data = chop_new1, aes(x= variant, y= median_scaled), color = "red", shape = 95, size = 5) +
+  labs(x= NULL, y= "CHOP ΔCq")+
+  geom_hline(yintercept = 0.07475767, linetype = "dotted", alpha = 0.5)+
+  #facet_grid(rows = vars(replicate)) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1), legend.position = "none")+NULL; chop_all
+
+ggsave("plots/fig2_rawdata/chop_all.pdf", chop_all, height = 1.5, width = 6)
+
+# chop_save = chop_new1 %>% select(variant, replicate, gmean_scaled_delta_cq, median_scaled)
+# write.csv(chop_save, "data/chop_raw.csv")
+```
+
+```{r qPCR - bax, eval=FALSE, include=FALSE}
+bax_run1_p1 = read.csv("data/bulk_assay_data/qPCR/bax_bcl2_run1/bax_p1_cq.csv")
+bax_run1_p1 = left_join(bax_run1_p1, plasmid_key)
+
+bax_run1_p2 = read.csv("data/bulk_assay_data/qPCR/bax_bcl2_run1/bax_p2_cq.csv") %>% filter(Target == "bax")
+bax_run1_p2 = left_join(bax_run1_p2, plasmid_key)
+
+bax_run1 = bind_rows(bax_run1_p1, bax_run1_p2)
+bax_run1 = bax_run1 %>% filter(Target == "bax")
+
+bax_run1_2 = bax_run1 %>% group_by(variant, replicate) %>% mutate(mean_cq = 10^(mean(log10(Cq), na.rm = T))) %>% distinct(variant, Target, replicate, mean_cq) %>% filter(Target == "bax")
+bax_run1_2 = left_join(bax_run1_2, actin)
+bax_run1_2 = bax_run1_2 %>% mutate(Cq_diff = abs(mean_cq - mean_actin))
+
+bax_run2 = read.csv("data/bulk_assay_data/qPCR/bax_bcl2_run2/bax_cq.csv")
+bax_run2 = left_join(bax_run2, plasmid_key)
+bax_run2_1 = bax_run2 %>% group_by(variant, replicate) %>% mutate(mean_cq = 10^(mean(log10(Cq), na.rm = T))) %>% distinct(variant, Target, replicate, mean_cq) %>% filter(Target == "bax")
+bax_run2_1 = left_join(bax_run2_1, actin)
+
+bax_run2_1 = bax_run2_1 %>% mutate(Cq_diff = abs(mean_cq - mean_actin))
+# bax_run2_1$replicate = as.character(bax_run2_1$replicate)
+
+bax <- rbind(bax_run1_2, bax_run2_1) %>% filter(!is.na(variant)) %>% mutate(delta_cq = 2^-Cq_diff) %>% filter(Cq_diff < 16) %>% group_by(variant) %>% mutate(var_mean_cqdiff = mean(Cq_diff))
+
+
+bax_scaled_histogram <- ggplot() + 
+  facet_grid(rows = vars(replicate)) + 
+  geom_histogram(data = bax, aes(x= Cq_diff, fill = variant)) +
+  NULL; bax_scaled_histogram
+
+ggplot(data = bax, aes(x= variant, y= Cq_diff, color = replicate))+
+  geom_quasirandom(alpha = 0.5) + labs(title = "new") + 
+  facet_grid(rows = vars(replicate)) + 
+  geom_point(data = bax, aes(x= variant, y= var_mean_cqdiff), color = "black", shape = 45, size = 5) +
+  NULL
+
+rep_medians <- bax %>% group_by(replicate) %>% summarize(med_ddcq = median(delta_cq, na.rm = T))
+med_ddcq <- median(rep_medians$med_ddcq)
+
+bax_rep1 <- bax %>% filter(replicate == 1) %>% mutate(scaled_delta_cq = delta_cq / rep_medians$med_ddcq[1] * med_ddcq)
+bax_rep2 <- bax %>% filter(replicate == 2) %>% mutate(scaled_delta_cq = delta_cq / rep_medians$med_ddcq[2] * med_ddcq)
+bax_rep3 <- bax %>% filter(replicate == 3) %>% mutate(scaled_delta_cq = delta_cq / rep_medians$med_ddcq[3] * med_ddcq)
+bax_rep4 <- bax %>% filter(replicate == 4) %>% mutate(scaled_delta_cq = delta_cq / rep_medians$med_ddcq[4] * med_ddcq)
+bax_rep5 <- bax %>% filter(replicate == 5) %>% mutate(scaled_delta_cq = delta_cq / rep_medians$med_ddcq[5] * med_ddcq)
+
+bax <- rbind(bax_rep1, bax_rep2, bax_rep3, bax_rep4, bax_rep5) %>% group_by(variant) %>% mutate(gmean_scaled_delta_cq = 10^mean(log10(scaled_delta_cq), na.rm = T), median_scaled = median(scaled_delta_cq, na.rm = T))
+
+scaled_rep_medians <- bax %>% group_by(replicate) %>% summarize(med_ddcq = median(scaled_delta_cq, na.rm = T))
+
+bax_scaled_histogram <- ggplot() + scale_x_log10() + 
+  geom_histogram(data = bax, aes(x= scaled_delta_cq, fill = variant)) +
+  facet_grid(rows = vars(replicate)) +
+  NULL; bax_scaled_histogram
+
+bax_scaled_plot = ggplot()+
+  geom_quasirandom(data = bax, aes(x= variant, y= scaled_delta_cq, color = replicate), alpha = 0.5) + 
+  scale_y_log10()+
+  geom_point(data = bax, aes(x= variant, y= gmean_scaled_delta_cq), color = "black", shape = 45, size = 5) +
+  labs(x= "Variant", y= "bax ΔCq")+
+  #facet_grid(rows = vars(replicate)) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1), legend.position = "bottom")+NULL; bax_scaled_plot
+
+
+bax$variant[bax$variant == "vif"] = "neg_cntrl"
+
+bax$variant = factor(bax$variant, c("neg_cntrl","WT","R429C", "R304W", "E66K", "A67T", "R69C", "R69H", "N80S", "E90D", "K73R", "D76G","G81C", "D84N",  "F91Y", "H72Q", "G81D", "D84E", "L92V", "L96V", "L74P", "D84G"))
+
+
+bax_all = ggplot()+
+  geom_quasirandom(data = bax, aes(x= variant, y= scaled_delta_cq), alpha = 0.5) + 
+  scale_y_log10(limits = c(0.0001, 0.03))+
+  geom_point(data = bax, aes(x= variant, y= median_scaled), color = "red", shape = 95, size = 5) +
+  labs(x= NULL, y= "bax ΔCq")+
+  geom_hline(yintercept = 0.0010569668, linetype = "dotted", alpha = 0.5)+
+  # facet_grid(rows = vars(replicate)) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1), legend.position = "none")+NULL; bax_all
+
+ggsave("plots/fig2_rawdata/bax_all.pdf", bax_all, height = 1.5, width = 6)
+```
+
+```{r qPCR - bcl2, eval=FALSE, include=FALSE}
+bcl2_run1_p1 = read.csv("data/bulk_assay_data/qPCR/bax_bcl2_run1/bcl2_p1_cq.csv")
+bcl2_run1_p1 = left_join(bcl2_run1_p1, plasmid_key)
+
+bcl2_run1_p2 = read.csv("data/bulk_assay_data/qPCR/bax_bcl2_run1/bcl2_p2_cq.csv") %>% filter(Target == "bcl2")
+bcl2_run1_p2 = left_join(bcl2_run1_p2, plasmid_key)
+
+bcl2_run1 = bind_rows(bcl2_run1_p1, bcl2_run1_p2)
+bcl2_run1 = bcl2_run1 %>% filter(Target == "bcl2")
+
+bcl2_run1_2 = bcl2_run1 %>% group_by(variant, replicate) %>% mutate(mean_cq = 10^(mean(log10(Cq), na.rm = T))) %>% distinct(variant, Target, replicate, mean_cq) %>% filter(Target == "bcl2")
+bcl2_run1_2 = left_join(bcl2_run1_2, actin)
+bcl2_run1_2 = bcl2_run1_2 %>% mutate(Cq_diff = abs(mean_cq - mean_actin))
+# bcl2_run1_2$replicate = as.character(bcl2_run1_2$replicate)
+
+#bcl2 run 3
+bcl2_run2 = read.csv("data/bulk_assay_data/qPCR/bax_bcl2_run2/bcl2_cq.csv")
+bcl2_run2 = left_join(bcl2_run2, plasmid_key)
+bcl2_run2_1 = bcl2_run2 %>% group_by(variant, replicate) %>% mutate(mean_cq = 10^(mean(log10(Cq), na.rm = T))) %>% distinct(variant, Target, replicate, mean_cq) %>% filter(Target == "bcl2")
+bcl2_run2_1 = left_join(bcl2_run2_1, actin)
+
+bcl2_run2_1 = bcl2_run2_1 %>% mutate(Cq_diff = abs(mean_cq - mean_actin))
+# bcl2_run2_1$replicate = as.character(bcl2_run2_1$replicate)
+
+## Scaled
+bcl2 <- rbind(bcl2_run1_2, bcl2_run2_1) %>% filter(!is.na(variant)) %>% mutate(delta_cq = 2^-Cq_diff) %>% filter(Cq_diff > 5 & Cq_diff < 18) %>% group_by(variant) %>% mutate(var_mean_cqdiff = mean(Cq_diff))
+
+# bcl2_control = read.csv("data/qpcr/bcl2_control.csv")
+# bcl2 = bind_rows(bcl2, bcl2_control)
+
+bcl2_scaled_histogram <- ggplot() + 
+  facet_grid(rows = vars(replicate)) + 
+  geom_histogram(data = bcl2, aes(x= Cq_diff, fill = variant)) +
+  NULL; bcl2_scaled_histogram
+
+rep_medians <- bcl2 %>% group_by(replicate) %>% summarize(med_ddcq = median(delta_cq, na.rm = T))
+med_ddcq <- median(rep_medians$med_ddcq)
+
+bcl2_rep1 <- bcl2 %>% filter(replicate == 1) %>% mutate(scaled_delta_cq = delta_cq / rep_medians$med_ddcq[1] * med_ddcq)
+bcl2_rep2 <- bcl2 %>% filter(replicate == 2) %>% mutate(scaled_delta_cq = delta_cq / rep_medians$med_ddcq[2] * med_ddcq)
+bcl2_rep3 <- bcl2 %>% filter(replicate == 3) %>% mutate(scaled_delta_cq = delta_cq / rep_medians$med_ddcq[3] * med_ddcq)
+bcl2_rep4 <- bcl2 %>% filter(replicate == 4) %>% mutate(scaled_delta_cq = delta_cq / rep_medians$med_ddcq[4] * med_ddcq)
+bcl2_rep5 <- bcl2 %>% filter(replicate == 5) %>% mutate(scaled_delta_cq = delta_cq / rep_medians$med_ddcq[5] * med_ddcq)
+
+bcl2 <- rbind(bcl2_rep1, bcl2_rep2, bcl2_rep3, bcl2_rep4, bcl2_rep5) %>% group_by(variant) %>% mutate(gmean_scaled_delta_cq = 10^mean(log10(scaled_delta_cq), na.rm = T), median_scaled = median(scaled_delta_cq, na.rm = T))
+
+scaled_rep_medians <- bcl2 %>% group_by(replicate) %>% summarize(med_ddcq = median(scaled_delta_cq, na.rm = T))
+
+bcl2_scaled_histogram <- ggplot() + scale_x_log10() + 
+  geom_histogram(data = bcl2, aes(x= scaled_delta_cq, fill = variant)) +
+  facet_grid(rows = vars(replicate)) +
+  NULL; bcl2_scaled_histogram
+
+bcl2_scaled_plot = ggplot()+
+  geom_quasirandom(data = bcl2, aes(x= variant, y= scaled_delta_cq, color = replicate), alpha = 0.5) + 
+  scale_y_log10()+
+  geom_point(data = bcl2, aes(x= variant, y= gmean_scaled_delta_cq), color = "black", shape = 45, size = 5) +
+  labs(x= "Variant", y= "bcl2 ΔCq")+
+  facet_grid(rows = vars(replicate)) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1), legend.position = "bottom")+NULL; bcl2_scaled_plot
+
+
+bcl2$variant[bcl2$variant == "vif"] = "neg_cntrl"
+
+bcl2$variant = factor(bcl2$variant, c("neg_cntrl","WT","R429C", "R304W", "E66K", "A67T", "R69C", "R69H", "N80S", "E90D", "K73R", "D76G","G81C", "D84N",  "F91Y", "H72Q", "G81D", "D84E", "L92V", "L96V", "L74P", "D84G"))
+
+bcl2_all = ggplot()+
+  geom_quasirandom(data = bcl2, aes(x= variant, y= scaled_delta_cq), alpha = 0.5) + 
+  geom_point(data = bcl2, aes(x= variant, y= median_scaled), color = "red", shape = 45, size = 5) +
+  labs(x= NULL, y= "bcl2c1 ΔCq")+
+  geom_hline(yintercept = 5.680065e-05, linetype = "dotted", alpha = 0.5)+
+  scale_y_log10(limits = c(0.000003, 0.0003))+
+  # facet_grid(rows = vars(replicate)) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1), legend.position = "none")+NULL; bcl2_all
+
+ggsave("plots/fig2_rawdata/bcl2_all.pdf", bcl2_all, height = 1.5, width = 6)
+
+```
+
+```{r qPCR - bax bcl2 ratio, eval=FALSE, include=FALSE}
+
+bax_bcl2_ratio <- merge(bax %>% select(variant, replicate, delta_cq), bcl2 %>% select(variant, replicate, delta_cq), by = c("variant","replicate")) %>% rename_with(~c("variant", "replicate", "bax", "bcl2")) %>% mutate(bax_bcl2_ratio = bax / bcl2)
+
+
+## Scaled
+bax_bcl2 <- bax_bcl2_ratio %>% filter(!is.na(variant)) %>% group_by(variant) %>% mutate(var_mean_ratio = mean(bax_bcl2_ratio))
+
+bax_bcl2_scaled_histogram <- ggplot() + 
+  facet_grid(rows = vars(replicate)) + 
+  geom_histogram(data = bax_bcl2, aes(x= bax_bcl2_ratio, fill = variant)) +
+  NULL; bax_bcl2_scaled_histogram
+
+ggplot(data = bax_bcl2, aes(x= variant, y= bax_bcl2_ratio, color = replicate))+
+  geom_quasirandom(alpha = 0.5) + 
+  facet_grid(rows = vars(replicate)) + 
+  geom_point(data = bax_bcl2, aes(x= variant, y= var_mean_ratio), color = "black", shape = 45, size = 5) +
+  NULL
+
+rep_medians <- bax_bcl2 %>% group_by(replicate) %>% summarize(med_ratio = median(bax_bcl2_ratio, na.rm = T))
+med_ratio <- median(rep_medians$med_ratio)
+
+bax_bcl2_rep1 <- bax_bcl2 %>% filter(replicate == 1) %>% mutate(scaled_bax_bcl2 = bax_bcl2_ratio / rep_medians$med_ratio[1] * med_ratio)
+bax_bcl2_rep2 <- bax_bcl2 %>% filter(replicate == 2) %>% mutate(scaled_bax_bcl2 = bax_bcl2_ratio / rep_medians$med_ratio[2] * med_ratio)
+bax_bcl2_rep3 <- bax_bcl2 %>% filter(replicate == 3) %>% mutate(scaled_bax_bcl2 = bax_bcl2_ratio / rep_medians$med_ratio[3] * med_ratio)
+bax_bcl2_rep4 <- bax_bcl2 %>% filter(replicate == 4) %>% mutate(scaled_bax_bcl2 = bax_bcl2_ratio / rep_medians$med_ratio[4] * med_ratio)
+bax_bcl2_rep5 <- bax_bcl2 %>% filter(replicate == 5) %>% mutate(scaled_bax_bcl2 = bax_bcl2_ratio / rep_medians$med_ratio[5] * med_ratio)
+
+bax_bcl2 <- rbind(bax_bcl2_rep1, bax_bcl2_rep2, bax_bcl2_rep3, bax_bcl2_rep4, bax_bcl2_rep5) %>% group_by(variant) %>% mutate(gmean_scaled_bax_bcl2 = 10^mean(log10(scaled_bax_bcl2), na.rm = T), median_scaled = median(scaled_bax_bcl2, na.rm = T))
+
+scaled_rep_medians <- bax_bcl2 %>% group_by(replicate) %>% summarize(med_ratio = median(bax_bcl2_ratio, na.rm = T))
+
+bax_bcl2_scaled_histogram <- ggplot() + scale_x_log10() + 
+  geom_histogram(data = bax_bcl2, aes(x= scaled_bax_bcl2, fill = variant)) +
+  facet_grid(rows = vars(replicate)) +
+  NULL; bax_bcl2_scaled_histogram
+
+bax_bcl2_scaled_plot = ggplot()+
+  geom_quasirandom(data = bax_bcl2, aes(x= variant, y= scaled_bax_bcl2, color = replicate), alpha = 0.5) + 
+  scale_y_log10()+
+  geom_point(data = bax_bcl2, aes(x= variant, y= med_ratio), color = "black", shape = 45, size = 5) +
+  labs(x= "Variant", y= "bax_bcl2 ΔCq")+
+  # facet_grid(rows = vars(replicate)) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1), legend.position = "bottom")+NULL; bax_bcl2_scaled_plot
+
+bax_bcl2$variant[bax_bcl2$variant == "vif"] = "neg_cntrl"
+
+bax_bcl2$variant = factor(bax_bcl2$variant, c("neg_cntrl","WT", "R429C", "R304W", "E66K", "A67T", "R69C", "R69H", "N80S", "E90D", "K73R", "D76G","G81C", "D84N",  "F91Y", "H72Q", "G81D", "D84E", "L92V", "L96V", "L74P", "D84G"))
+
+bax_bcl2_all = ggplot()+
+  geom_quasirandom(data = bax_bcl2, aes(x= variant, y= scaled_bax_bcl2), alpha = 0.5) + 
+  scale_y_log10(limits = c(1, 30))+
+  geom_point(data = bax_bcl2, aes(x= variant, y= median_scaled), color = "red", shape = 45, size = 5) +
+  labs(x= NULL, y= "bax/bcl-2 ratio")+
+  geom_hline(yintercept = 5.515885, linetype = "dotted", alpha = 0.5)+
+  # facet_grid(rows = vars(replicate)) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1), legend.position = "none")+NULL; bax_bcl2_all
+
+ggsave("plots/fig2_rawdata/bax_bcl2_all.pdf", bax_bcl2_all, height = 1.5, width = 6)
+
+```
+
+```{r qPCR - nfkb1, eval=FALSE, include=FALSE}
+nfkb_run1_p1 = read.csv("data/bulk_assay_data/qPCR/nfkb_run1/nfkb_p1_cq.csv")
+nfkb_run1_p1 = left_join(nfkb_run1_p1, plasmid_key)
+
+nfkb_run1_p2 = read.csv("data/bulk_assay_data/qPCR/nfkb_run1/chop_nfkb_p2_cq.csv") %>% filter(Target == "nfkb")
+nfkb_run1_p2 = left_join(nfkb_run1_p2, plasmid_key)
+
+nfkb_run1 = bind_rows(nfkb_run1_p1, nfkb_run1_p2)
+nfkb_run1 = nfkb_run1 %>% filter(Target == "nfkb")
+
+nfkb_run1_2 = nfkb_run1 %>% group_by(variant, replicate) %>% mutate(mean_cq = 10^(mean(log10(Cq), na.rm = T))) %>% distinct(variant, Target, replicate, mean_cq) %>% filter(Target == "nfkb")
+nfkb_run1_2 = left_join(nfkb_run1_2, actin)
+nfkb_run1_2 = nfkb_run1_2 %>% mutate(Cq_diff = abs(mean_cq - mean_actin))
+# nfkb_run1_2$replicate = as.character(nfkb_run1_2$replicate)
+
+nfkb_run2 = read.csv("data/bulk_assay_data/qPCR/nfkb_run2/nfkb_cq.csv")
+nfkb_run2 = left_join(nfkb_run2, plasmid_key)
+nfkb_run2_1 = nfkb_run2 %>% group_by(variant, replicate) %>% mutate(mean_cq = 10^(mean(log10(Cq), na.rm = T))) %>% distinct(variant, Target, replicate, mean_cq) %>% filter(Target == "nfkb")
+nfkb_run2_1 = left_join(nfkb_run2_1, actin)
+
+nfkb_run2_1 = nfkb_run2_1 %>% mutate(Cq_diff = abs(mean_cq - mean_actin))
+# nfkb_run2_1$replicate = as.character(nfkb_run2_1$replicate)
+
+## Scaled
+nfkb <- rbind(nfkb_run1_2, nfkb_run2_1) %>% filter(!is.na(variant)) %>% mutate(delta_cq = 2^-Cq_diff) %>% filter(Cq_diff < 12) %>% group_by(variant) %>% mutate(var_mean_cqdiff = mean(Cq_diff))
+
+# nfkb_control = read.csv("data/qpcr/nfkb_control.csv")
+# nfkb = bind_rows(nfkb, nfkb_control)
+
+nfkb_scaled_histogram <- ggplot() + #scale_x_log10() + 
+  geom_histogram(data = nfkb, aes(x= Cq_diff, fill = variant)) +
+  NULL; nfkb_scaled_histogram
+
+ggplot(data = nfkb, aes(x= variant, y= Cq_diff, color = replicate))+
+  geom_quasirandom(alpha = 0.5) + labs(title = "new") + 
+  facet_grid(rows = vars(replicate)) + 
+  geom_point(data = nfkb, aes(x= variant, y= var_mean_cqdiff), color = "black", shape = 45, size = 5) +
+  NULL
+
+rep_medians <- nfkb %>% group_by(replicate) %>% summarize(med_ddcq = median(delta_cq, na.rm = T))
+med_ddcq <- median(rep_medians$med_ddcq)
+
+nfkb_rep1 <- nfkb %>% filter(replicate == 1) %>% mutate(scaled_delta_cq = delta_cq / rep_medians$med_ddcq[1] * med_ddcq)
+nfkb_rep2 <- nfkb %>% filter(replicate == 2) %>% mutate(scaled_delta_cq = delta_cq / rep_medians$med_ddcq[2] * med_ddcq)
+nfkb_rep3 <- nfkb %>% filter(replicate == 3) %>% mutate(scaled_delta_cq = delta_cq / rep_medians$med_ddcq[3] * med_ddcq)
+nfkb_rep4 <- nfkb %>% filter(replicate == 4) %>% mutate(scaled_delta_cq = delta_cq / rep_medians$med_ddcq[4] * med_ddcq)
+nfkb_rep5 <- nfkb %>% filter(replicate == 5) %>% mutate(scaled_delta_cq = delta_cq / rep_medians$med_ddcq[5] * med_ddcq)
+
+nfkb <- rbind(nfkb_rep1, nfkb_rep2, nfkb_rep3, nfkb_rep4, nfkb_rep5) %>% group_by(variant) %>% mutate(gmean_scaled_delta_cq = 10^mean(log10(scaled_delta_cq), na.rm = T), median_scaled = median(scaled_delta_cq, na.rm = T))
+
+scaled_rep_medians <- nfkb %>% group_by(replicate) %>% summarize(med_ddcq = median(scaled_delta_cq, na.rm = T))
+
+nfkb_scaled_histogram <- ggplot() + scale_x_log10() + 
+  geom_histogram(data = nfkb, aes(x= scaled_delta_cq, fill = variant)) +
+  facet_grid(rows = vars(replicate)) +
+  NULL; nfkb_scaled_histogram
+
+nfkb$variant[nfkb$variant == "vif"] = "neg_cntrl"
+
+nfkb$variant = factor(nfkb$variant, c("neg_cntrl","WT","R429C","R304W", "E66K", "A67T", "R69C", "R69H", "N80S", "E90D", "K73R", "D76G","G81C", "D84N",  "F91Y", "H72Q", "G81D", "D84E", "L92V", "L96V", "L74P", "D84G"))
+
+nfkb_all = ggplot()+
+  geom_quasirandom(data = nfkb, aes(x= variant, y= scaled_delta_cq), alpha = 0.5) + 
+  scale_y_log10(limits = c(0.003, 0.1))+
+  geom_point(data = nfkb, aes(x= variant, y= median_scaled), color = "red", shape = 95, size = 5) +
+  labs(x= NULL, y= "NFkB1 ΔCq")+
+  geom_hline(yintercept = 0.013496063, linetype = "dotted", alpha = 0.5)+
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1), legend.position = "none")+NULL; nfkb_all
+
+ggsave("plots/fig2_rawdata/nfkb_all.pdf", nfkb_all, height = 1.5, width = 6)
+
+```
+
+```{r qPCR - nfatc1, eval=FALSE, include=FALSE}
+nfat_run1_p1 = read.csv("data/bulk_assay_data/qPCR/nfat_run1/nfat_p1_cq.csv")
+nfat_run1_p1 = left_join(nfat_run1_p1, plasmid_key)
+
+nfat_run1_p2 = read.csv("data/bulk_assay_data/qPCR/nfat_run1/nfat_p2_cq.csv")
+nfat_run1_p2 = left_join(nfat_run1_p2, plasmid_key)
+
+nfat_run1 = bind_rows(nfat_run1_p1, nfat_run1_p2)
+nfat_run1 = nfat_run1 %>% filter(Target == "nfat")
+
+nfat_run1_2 = nfat_run1 %>% group_by(variant, replicate) %>% mutate(mean_cq = exp(mean(log(Cq), na.rm = T))) %>% distinct(variant, Target, replicate, mean_cq) %>% filter(Target == "nfat")
+nfat_run1_2 = left_join(nfat_run1_2, actin)
+nfat_run1_2 = nfat_run1_2 %>% mutate(Cq_diff = abs(mean_cq - mean_actin))
+# nfat_run1_2$replicate = as.character(nfat_run1_2$replicate)
+
+#nfat run 3
+nfat_run2 = read.csv("data/bulk_assay_data/qPCR/nfat_run2/nfat_cq.csv")
+nfat_run2 = left_join(nfat_run2, plasmid_key)
+nfat_run2_1 = nfat_run2 %>% group_by(variant, replicate) %>% mutate(mean_cq = exp(mean(log(Cq), na.rm = T))) %>% distinct(variant, Target, replicate, mean_cq) %>% filter(Target == "nfat")
+nfat_run2_1 = left_join(nfat_run2_1, actin)
+
+nfat_run2_1 = nfat_run2_1 %>% mutate(Cq_diff = abs(mean_cq - mean_actin))
+# nfat_run2_1$replicate = as.character(nfat_run2_1$replicate)
+
+
+## Scaled
+nfat <- rbind(nfat_run1_2, nfat_run2_1) %>% filter(!is.na(variant)) %>% mutate(delta_cq = 2^-Cq_diff) %>% filter(Cq_diff < 30) %>% group_by(variant) %>% mutate(var_mean_cqdiff = mean(Cq_diff))
+
+
+nfat_scaled_histogram <- ggplot() + 
+  facet_grid(rows = vars(replicate)) + 
+  geom_histogram(data = nfat, aes(x= Cq_diff, fill = variant)) +
+  NULL; nfat_scaled_histogram
+
+ggplot(data = nfat, aes(x= variant, y=delta_cq, color = replicate))+
+  geom_quasirandom(alpha = 0.5) + labs(title = "new") + 
+  # facet_grid(rows = vars(replicate)) + 
+  # geom_point(data = nfat, aes(x= variant, y= var_mean_cqdiff), color = "black", shape = 45, size = 5) +
+  NULL
+
+rep_medians <- nfat %>% group_by(replicate) %>% summarize(med_ddcq = median(delta_cq, na.rm = T))
+med_ddcq <- median(rep_medians$med_ddcq)
+
+nfat_rep1 <- nfat %>% filter(replicate == 1) %>% mutate(scaled_delta_cq = delta_cq / rep_medians$med_ddcq[1] * med_ddcq)
+nfat_rep2 <- nfat %>% filter(replicate == 2) %>% mutate(scaled_delta_cq = delta_cq / rep_medians$med_ddcq[2] * med_ddcq)
+nfat_rep3 <- nfat %>% filter(replicate == 3) %>% mutate(scaled_delta_cq = delta_cq / rep_medians$med_ddcq[3] * med_ddcq)
+nfat_rep4 <- nfat %>% filter(replicate == 4) %>% mutate(scaled_delta_cq = delta_cq / rep_medians$med_ddcq[4] * med_ddcq)
+nfat_rep5 <- nfat %>% filter(replicate == 5) %>% mutate(scaled_delta_cq = delta_cq / rep_medians$med_ddcq[5] * med_ddcq)
+
+nfat <- rbind(nfat_rep1, nfat_rep2, nfat_rep3, nfat_rep4, nfat_rep5) %>% group_by(variant) %>% mutate(gmean_scaled_delta_cq = 10^mean(log10(scaled_delta_cq), na.rm = T), median_scaled = median(scaled_delta_cq, na.rm = T))
+
+scaled_rep_medians <- nfat %>% group_by(replicate) %>% summarize(med_ddcq = median(scaled_delta_cq, na.rm = T))
+
+nfat_scaled_histogram <- ggplot() + scale_x_log10() + 
+  geom_histogram(data = nfat, aes(x= scaled_delta_cq, fill = variant)) +
+  facet_grid(rows = vars(replicate)) +
+  NULL; nfat_scaled_histogram
+
+nfat_scaled_plot = ggplot()+
+  geom_quasirandom(data = nfat, aes(x= variant, y= scaled_delta_cq, color = replicate), alpha = 0.5) + 
+  scale_y_log10()+
+  geom_point(data = nfat, aes(x= variant, y= gmean_scaled_delta_cq), color = "black", shape = 45, size = 5) +
+  labs(x= "Variant", y= "nfat ΔCq")+
+  facet_grid(rows = vars(replicate)) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1), legend.position = "bottom")+NULL; nfat_scaled_plot
+
+nfat$variant[nfat$variant == "vif"] = "neg_cntrl"
+
+nfat$variant = factor(nfat$variant, c("neg_cntrl","WT","R429C", "R304W", "E66K", "A67T", "R69C", "R69H", "N80S", "E90D", "K73R", "D76G","G81C", "D84N",  "F91Y", "H72Q", "G81D", "D84E", "L92V", "L96V", "L74P", "D84G"))
+
+nfat_all = ggplot()+
+  geom_quasirandom(data = nfat, aes(x= variant, y= scaled_delta_cq), alpha = 0.5) + 
+  scale_y_log10(limits = c(0.0001, 0.01))+
+  geom_point(data = nfat, aes(x= variant, y= median_scaled), color = "red", shape = 95, size = 5) +
+  labs(x= NULL, y= "NFATc1 ΔCq")+
+  geom_hline(yintercept = 0.0008430855, linetype = "dotted", alpha = 0.5)+
+  # facet_grid(rows = vars(replicate)) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1), legend.position = "none")+NULL; nfat_all
+
+ggsave("plots/fig2_rawdata/nfat_all.pdf", nfat_all, height = 1.5, width = 6)
+```
+
+```{r creating a single dataframe of all readouts, eval=FALSE, include=FALSE}
+rm(list = setdiff(ls(), c("aggregation", "ab", "ecr", "actin", "plasmid_key", "bip_new1", "chop_new1", "bax", "bcl2", "bax_bcl2", "nfkb", "nfat")))
+
+names(aggregation)[names(aggregation) == "scaled_median"] = "puncta_formation"
+aggregation = aggregation %>% select(variant, aggregation) %>% distinct()
+
+names(ab)[names(ab) == "median_scaled"] = "abundance"
+ab = ab %>% select(variant, abundance) %>% distinct()
+
+names(ecr)[names(ecr) == "median_ratio"] = "campari"
+ecr = ecr %>% select(variant, campari) %>% distinct()
+
+names(bip_new1)[names(bip_new1) == "median_scaled"] = "bip"
+bip_new1 = bip_new1 %>% select(variant, bip) %>% distinct()
+
+names(chop_new1)[names(chop_new1) == "median_scaled"] = "chop"
+chop_new1 = chop_new1 %>% select(variant, chop) %>% distinct()
+
+names(bax)[names(bax) == "median_scaled"] = "bax"
+bax = bax %>% select(variant, bax) %>% distinct()
+
+names(bcl2)[names(bcl2) == "median_scaled"] = "bcl2"
+bcl2 = bcl2 %>% select(variant, bcl2) %>% distinct()
+
+names(bax_bcl2)[names(bax_bcl2) == "median_scaled"] = "bax_bcl2"
+bax_bcl2 = bax_bcl2 %>% select(variant, bax_bcl2) %>% distinct()
+
+names(nfkb)[names(nfkb) == "median_scaled"] = "nfkb"
+nfkb = nfkb %>% select(variant, nfkb) %>% distinct()
+
+names(nfat)[names(nfat) == "median_scaled"] = "nfat"
+nfat = nfat %>% select(variant, nfat) %>% distinct()
+
+variant_list = read.csv("data/bulk_assay_data/variant_list.csv")
+
+all_data = left_join(variant_list, aggregation)
+all_data = left_join(all_data, ab)
+all_data = left_join(all_data, ecr)
+all_data = left_join(all_data, bip_new1)
+all_data = left_join(all_data, chop_new1)
+all_data = left_join(all_data, bax)
+all_data = left_join(all_data, bcl2)
+all_data = left_join(all_data, bax_bcl2)
+all_data = left_join(all_data, nfkb)
+all_data = left_join(all_data, nfat)
+
+#bringing in the previously calculated survival scores
+endo_ratio = read.csv("data/prev_survival_scores.csv") %>% select(variant, endo_ratio)
+
+all_data = left_join(all_data, endo_ratio)
+write.csv(all_data, "data/all_data_vus.csv")
+```
+
+#Initial DMS FASTQ file data processing
+```{r Initial raw data processing, eval=FALSE, include=FALSE}
+#to generate summary.tsv files, run python script "python_scripts/fastq_process_improve.py" using FASTQ files from NCBI GEO GSE354034
+#gating strategy A
+scamp_r3g1_a = read.delim("I1167_summary.tsv")
+scamp_r3g1_a = scamp_r3g1_a[-1]
+colnames(scamp_r3g1_a)[2] = "r3g1_a"
+
+scamp_r3g1_b = read.delim("I1168_summary.tsv")
+scamp_r3g1_b = scamp_r3g1_b[-1]
+colnames(scamp_r3g1_b)[2] = "r3g1_b"
+
+scamp_r3g1_c= read.delim("I1169_summary.tsv")
+scamp_r3g1_c = scamp_r3g1_c[-1]
+colnames(scamp_r3g1_c)[2] = "r3g1_c"
+
+scamp_r3g1_d= read.delim("I1170_summary.tsv")
+scamp_r3g1_d = scamp_r3g1_d[-1]
+colnames(scamp_r3g1_d)[2] = "r3g1_d"
+
+scamp_r4g1_a= read.delim("I1171_summary.tsv")
+scamp_r4g1_a = scamp_r4g1_a[-1]
+colnames(scamp_r4g1_a)[2] = "r4g1_a"
+
+scamp_r4g1_b= read.delim("I1172_summary.tsv")
+scamp_r4g1_b = scamp_r4g1_b[-1]
+colnames(scamp_r4g1_b)[2] = "r4g1_b"
+
+scamp_r4g1_c= read.delim("I1173_summary.tsv")
+scamp_r4g1_c = scamp_r4g1_c[-1]
+colnames(scamp_r4g1_c)[2] = "r4g1_c"
+
+scamp_r4g1_d= read.delim("I1174_summary.tsv")
+scamp_r4g1_d = scamp_r4g1_d[-1]
+colnames(scamp_r4g1_d)[2] = "r4g1_d"
+
+scamp_r5g1_a= read.delim("I1175_summary.tsv")
+scamp_r5g1_a = scamp_r5g1_a[-1]
+colnames(scamp_r5g1_a)[2] = "r5g1_a"
+
+scamp_r5g1_b= read.delim("I1176_summary.tsv")
+scamp_r5g1_b = scamp_r5g1_b[-1]
+colnames(scamp_r5g1_b)[2] = "r5g1_b"
+
+scamp_r5g1_c= read.delim("I1177_summary.tsv")
+scamp_r5g1_c = scamp_r5g1_c[-1]
+colnames(scamp_r5g1_c)[2] = "r5g1_c"
+
+scamp_r5g1_d= read.delim("I1178_summary.tsv")
+scamp_r5g1_d = scamp_r5g1_d[-1]
+colnames(scamp_r5g1_d)[2] = "r5g1_d"
+
+#gating strategy B
+scamp_r3g2_a= read.delim("I1179_summary.tsv")
+scamp_r3g2_a = scamp_r3g2_a[-1]
+colnames(scamp_r3g2_a)[2] = "r3g2_a"
+
+scamp_r3g2_b= read.delim("I1180_summary.tsv")
+scamp_r3g2_b = scamp_r3g2_b[-1]
+colnames(scamp_r3g2_b)[2] = "r3g2_b"
+
+scamp_r3g2_c= read.delim("I1181_summary.tsv")
+scamp_r3g2_c = scamp_r3g2_c[-1]
+colnames(scamp_r3g2_c)[2] = "r3g2_c"
+
+scamp_r3g2_d= read.delim("I1182_summary.tsv")
+scamp_r3g2_d = scamp_r3g2_d[-1]
+colnames(scamp_r3g2_d)[2] = "r3g2_d"
+
+scamp_r4g2_a= read.delim("I1183_summary.tsv")
+scamp_r4g2_a = scamp_r4g2_a[-1]
+colnames(scamp_r4g2_a)[2] = "r4g2_a"
+
+scamp_r4g2_b= read.delim("I1184_summary.tsv")
+scamp_r4g2_b = scamp_r4g2_b[-1]
+colnames(scamp_r4g2_b)[2] = "r4g2_b"
+
+scamp_r4g2_c= read.delim("I1185_summary.tsv")
+scamp_r4g2_c = scamp_r4g2_c[-1]
+colnames(scamp_r4g2_c)[2] = "r4g2_c"
+
+scamp_r4g2_d= read.delim("I1186_summary.tsv")
+scamp_r4g2_d = scamp_r4g2_d[-1]
+colnames(scamp_r4g2_d)[2] = "r4g2_d"
+
+scamp_r5g2_a= read.delim("I1187_summary.tsv")
+scamp_r5g2_a = scamp_r5g2_a[-1]
+colnames(scamp_r5g2_a)[2] = "r5g2_a"
+
+scamp_r5g2_b= read.delim("I1188_summary.tsv")
+scamp_r5g2_b = scamp_r5g2_b[-1]
+colnames(scamp_r5g2_b)[2] = "r5g2_b"
+
+scamp_r5g2_c= read.delim("I1189_summary.tsv")
+scamp_r5g2_c = scamp_r5g2_c[-1]
+colnames(scamp_r5g2_c)[2] = "r5g2_c"
+
+scamp_r5g2_d= read.delim("I1190_summary.tsv")
+scamp_r5g2_d = scamp_r5g2_d[-1]
+colnames(scamp_r5g2_d)[2] = "r5g2_d"
+
+#survival
+scamp_r3_survival= read.delim("I1191_summary.tsv")
+scamp_r3_survival = scamp_r3_survival[-1]
+colnames(scamp_r3_survival)[2] = "r3_sur"
+scamp_r4_survival= read.delim("I1192_summary.tsv")
+scamp_r4_survival = scamp_r4_survival[-1]
+colnames(scamp_r4_survival)[2] = "r4_sur"
+scamp_r5_survival= read.delim("I1193_summary.tsv")
+scamp_r5_survival = scamp_r5_survival[-1]
+colnames(scamp_r5_survival)[2] = "r5_sur"
+scamp_lib= read.delim("I1194_summary.tsv")
+scamp_lib = scamp_lib[-1]
+colnames(scamp_lib)[2] = "lib"
+
+counts_g1 = left_join(variant_name, scamp_r3g1_a)
+counts_g1 = left_join(counts_g1, scamp_r3g1_b)
+counts_g1 = left_join(counts_g1, scamp_r3g1_c)
+counts_g1 = left_join(counts_g1, scamp_r3g1_d)
+counts_g1 = left_join(counts_g1, scamp_r4g1_a)
+counts_g1 = left_join(counts_g1, scamp_r4g1_b)
+counts_g1 = left_join(counts_g1, scamp_r4g1_c)
+counts_g1 = left_join(counts_g1, scamp_r4g1_d)
+counts_g1 = left_join(counts_g1, scamp_r5g1_a)
+counts_g1 = left_join(counts_g1, scamp_r5g1_b)
+counts_g1 = left_join(counts_g1, scamp_r5g1_c)
+counts_g1 = left_join(counts_g1, scamp_r5g1_d)
+
+counts_g2 = left_join(variant_name, scamp_r3g2_a)
+counts_g2 = left_join(counts_g2, scamp_r3g2_b)
+counts_g2 = left_join(counts_g2, scamp_r3g2_c)
+counts_g2 = left_join(counts_g2, scamp_r3g2_d)
+counts_g2 = left_join(counts_g2, scamp_r4g2_a)
+counts_g2 = left_join(counts_g2, scamp_r4g2_b)
+counts_g2 = left_join(counts_g2, scamp_r4g2_c)
+counts_g2 = left_join(counts_g2, scamp_r4g2_d)
+counts_g2 = left_join(counts_g2, scamp_r5g2_a)
+counts_g2 = left_join(counts_g2, scamp_r5g2_b)
+counts_g2 = left_join(counts_g2, scamp_r5g2_c)
+counts_g2 = left_join(counts_g2, scamp_r5g2_d)
+
+write.csv(counts_g1, "counts_gate1.csv")
+write.csv(counts_g2, "counts_gate2.csv")
+```
+
+#Processing REVEL scores 
+```{r REVEL, eval=FALSE, include=FALSE}
+#REVEL scores were generated by downloading the “Chromosome 11: 000168961 - 005537458” genome segment file from the website (https://sites.google.com/site/revelgenomics/downloads/revel-genome-segment-files?authuser=0), filtering the data to variants associated with STIM1 Ensembl ID ENST00000300737 and converting the genome coordinates of each substitution to amino acid changes using genomeToProtein function from Ensembldb library
+
+revel = read.csv("data/revel_chr11.csv")
+revel = revel %>% separate_longer_delim(cols = Ensembl_transcriptid, delim = ";") 
+revel_stim1 = revel %>% dplyr::filter(Ensembl_transcriptid == "ENST00000300737")
+library(ensembldb)
+library(EnsDb.Hsapiens.v86)
+library(GenomicRanges)
+library(IRanges)
+
+edb <- EnsDb.Hsapiens.v86
+revel_stim1$grch38_pos = as.numeric(revel_stim1$grch38_pos)
+
+
+revel_stim1$chr <- gsub("chr", "", as.character(revel_stim1$chr))
+
+
+gn_coords <- GRanges(
+  seqnames = revel_stim1$chr,
+  ranges = IRanges(start = revel_stim1$grch38_pos, end = revel_stim1$grch38_pos),
+  tx_id = revel_stim1$Ensemble_transcriptID  # Save the transcript ID as metadata
+)
+
+
+aa_mapped <- genomeToProtein(gn_coords, edb)
+
+aa_df <- as.data.frame(aa_mapped)
+
+aa_df_filtered <- aa_df[aa_df$tx_id == "ENST00000300737", ]
+colnames(aa_df_filtered)[11] = "grch38_pos"
+aa_df_filtered1 = aa_df_filtered %>% dplyr::select(tx_id, grch38_pos, start, end)
+
+revel_stim1 = left_join(revel_stim1, aa_df_filtered1)
+
+revel_stim1_ef = revel_stim1 %>% dplyr::filter(start %in% c(63:98))
+
+revel_stim1_ef = revel_stim1_ef %>% unite(col = "variant", aaref, start, aaalt, sep = "", remove = FALSE)
+revel_stim1_ef1 = revel_stim1_ef %>% dplyr::select(variant, REVEL) %>% distinct()
+
+write.csv(revel_stim1_ef1, "data/revel_stim1_ef.csv")
+
+ggplot()+
+  geom_histogram(data = revel_stim1_ef1, aes(x= REVEL), alpha = 0.5, color = "black", fill = "grey")+
+  geom_histogram(data = revel_stim1_ef1 %>% dplyr::filter(variant %in% c("H72Q", "D84G", "G81D", "L96V", "L92V")), aes(x= REVEL), fill = "red")+
+  geom_histogram(data = revel_stim1_ef1 %>% dplyr::filter(variant %in% c("A67T", "E66K", "R69C", "R69H")), aes(x= REVEL), fill = "green")
+```
+
+
+
+
+
+
