@@ -2264,6 +2264,22 @@ ggplot()+
 ```
 
 
+```{r}
+followup_campari <- read.csv(file = "data/261119_CaMPARI2_flow.csv", header = T, stringsAsFactors = F) %>% mutate(mean = (rep1 + rep2 + rep3 + rep4 + rep5 + rep6)/6)
+
+followup_campari_pivot <- followup_campari %>% pivot_longer(cols = c(rep1,rep2,rep3,rep4,rep5,rep6))
+
+followup_campari$variant <- factor(followup_campari$variant, levels = c("WT","D76X","R304W","N70N","D82Y","D89Y"))
+
+followup_campari_plot <- ggplot() + theme_bw() + theme(panel.grid = element_blank()) + 
+  labs(x = NULL, y = "Normalized\nRed:Green ratio") + 
+  scale_y_log10() + 
+  geom_hline(yintercept = 1, alpha = 0.4, linetype = 2) +
+  geom_quasirandom(data = followup_campari_pivot, aes(x = variant, y = value), alpha = 0.25) +
+  geom_point(data = followup_campari, aes(x = variant, y = mean), shape = 95, size = 8) +
+  NULL; followup_campari_plot; ggsave("plots/followup_campari_plot.pdf", followup_campari_plot, height = 2, width = 3.4)
+
+```
 
 
 
